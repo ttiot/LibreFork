@@ -11,7 +11,7 @@ pub struct CommitInfo {
     pub author: String,
     pub email: String,
     pub time: String,
-    pub parents: usize,
+    pub parents: Vec<String>,
     pub refs: Vec<String>,
 }
 
@@ -160,6 +160,8 @@ impl RepoHandle {
                 }
             }
 
+            let parents: Vec<String> = commit.parents().map(|p| p.id().to_string()).collect();
+
             commits.push(CommitInfo {
                 oid: oid.to_string(),
                 short_id,
@@ -167,7 +169,7 @@ impl RepoHandle {
                 author: name,
                 email,
                 time: time_str,
-                parents: commit.parent_count() as usize,
+                parents,
                 refs,
             });
         }
@@ -225,6 +227,8 @@ impl RepoHandle {
                 }
             }
 
+            let parents: Vec<String> = commit.parents().map(|p| p.id().to_string()).collect();
+
             commits.push(CommitInfo {
                 oid: oid.to_string(),
                 short_id,
@@ -232,7 +236,7 @@ impl RepoHandle {
                 author: name,
                 email,
                 time: time_str,
-                parents: commit.parent_count() as usize,
+                parents,
                 refs,
             });
         }
@@ -272,6 +276,8 @@ impl RepoHandle {
             }
         }
 
+        let parents: Vec<String> = commit.parents().map(|p| p.id().to_string()).collect();
+
         let info = CommitInfo {
             oid: oid.to_string(),
             short_id,
@@ -279,7 +285,7 @@ impl RepoHandle {
             author: name,
             email,
             time: time_str,
-            parents: commit.parent_count() as usize,
+            parents,
             refs,
         };
 
