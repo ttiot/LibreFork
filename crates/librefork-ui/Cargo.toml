@@ -12,3 +12,4 @@ glib = { workspace = true }
 gio = { workspace = true }
 once_cell = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
