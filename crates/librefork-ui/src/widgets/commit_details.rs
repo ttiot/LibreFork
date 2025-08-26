@@ -143,7 +143,8 @@ impl CommitDetails {
         }
 
         for file in diffs {
-            let frame_inline = gtk::Frame::new(Some(&file.path));
+            let title = format!("{} ({})", file.path, file.status);
+            let frame_inline = gtk::Frame::new(Some(&title));
             let view_inline = gtk::TextView::new();
             view_inline.set_editable(false);
             view_inline.set_cursor_visible(false);
@@ -186,7 +187,7 @@ impl CommitDetails {
             frame_inline.set_child(Some(&view_inline));
             self.inline_container.append(&frame_inline);
 
-            let frame_side = gtk::Frame::new(Some(&file.path));
+            let frame_side = gtk::Frame::new(Some(&title));
             let view_side = gtk::TextView::new();
             view_side.set_editable(false);
             view_side.set_cursor_visible(false);

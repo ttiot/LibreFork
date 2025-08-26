@@ -1,16 +1,16 @@
-
 use adw::prelude::*;
+use gtk::Orientation;
 use gtk4 as gtk;
 use gtk4::pango;
-use gtk::Orientation;
+use librefork_core::CommitInfo;
 use std::cell::RefCell;
 use std::rc::Rc;
-use librefork_core::CommitInfo;
 
 #[derive(Clone)]
 pub struct CommitList {
     root: gtk::Box,
     list: gtk::ListBox,
+    commits: Rc<RefCell<Vec<CommitInfo>>>,
     on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>>,
 }
 
@@ -27,6 +27,7 @@ impl CommitList {
         root.append(&list);
 
         let on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>> = Rc::new(RefCell::new(None));
+        let commits: Rc<RefCell<Vec<CommitInfo>>> = Rc::new(RefCell::new(Vec::new()));
 
         let cb = on_select.clone();
         list.connect_row_selected(move |_, row| {
@@ -38,14 +39,19 @@ impl CommitList {
             }
         });
 
-        Self { root, list, on_select }
+        Self {
+            root,
+            list,
+            commits,
+            on_select,
+        }
     }
 
     pub fn widget(&self) -> &gtk::Widget {
         self.root.upcast_ref()
     }
 
-    fn row_from_commit(c: CommitInfo) -> gtk::ListBoxRow {
+    fn row_from_commit(c: &CommitInfo) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
 
         let row_box = gtk::Box::new(Orientation::Vertical, 4);
@@ -67,6 +73,10 @@ impl CommitList {
         summary.set_xalign(0.0);
         summary.set_ellipsize(pango::EllipsizeMode::End);
         summary.set_hexpand(true);
+        let lowered = c.summary.to_lowercase();
+        if lowered.contains("crash") {
+            summary.add_css_class("commit-warning");
+        }
 
         top.append(&graph);
         top.append(&hash);
@@ -94,24 +104,56 @@ impl CommitList {
     }
 
     pub fn load(&self, commits: Vec<CommitInfo>) {
-        while let Some(child) = self.list.first_child() {
-            self.list.remove(&child);
+        {
+            let mut all = self.commits.borrow_mut();
+            all.clear();
+            all.extend(commits.clone());
         }
-
-        for c in commits {
-            let row = Self::row_from_commit(c);
-            self.list.append(&row);
-        }
+        self.reload_list(&commits);
     }
 
     pub fn append(&self, commits: Vec<CommitInfo>) {
+        {
+            let mut all = self.commits.borrow_mut();
+            all.extend(commits.clone());
+        }
         for c in commits {
-            let row = Self::row_from_commit(c);
+            let row = Self::row_from_commit(&c);
             self.list.append(&row);
         }
     }
 
     pub fn connect_on_select<F: Fn(&str) + 'static>(&self, f: F) {
         *self.on_select.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn filter(&self, query: &str) {
+        let all = self.commits.borrow();
+        if query.is_empty() {
+            self.reload_list(&all);
+        } else {
+            let q = query.to_lowercase();
+            let filtered: Vec<CommitInfo> = all
+                .iter()
+                .filter(|c| {
+                    c.summary.to_lowercase().contains(&q)
+                        || c.author.to_lowercase().contains(&q)
+                        || c.short_id.contains(&q)
+                        || c.oid.contains(&q)
+                })
+                .cloned()
+                .collect();
+            self.reload_list(&filtered);
+        }
+    }
+
+    fn reload_list(&self, commits: &[CommitInfo]) {
+        while let Some(child) = self.list.first_child() {
+            self.list.remove(&child);
+        }
+        for c in commits {
+            let row = Self::row_from_commit(c);
+            self.list.append(&row);
+        }
     }
 }

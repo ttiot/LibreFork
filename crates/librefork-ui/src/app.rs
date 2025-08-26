@@ -6,7 +6,11 @@ use librefork_core::RepoHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::widgets::{commit_details::CommitDetails, commit_list::CommitList};
+use crate::widgets::{
+    commit_details::CommitDetails,
+    commit_list::CommitList,
+    side_panel::SidePanel,
+};
 
 pub fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
@@ -29,6 +33,31 @@ pub fn build_ui(app: &Application) {
     let refresh_button = gtk::Button::with_label("Rafraîchir");
     header.pack_end(&refresh_button);
 
+    let fetch_button = gtk::Button::with_label("Fetch");
+    header.pack_end(&fetch_button);
+
+    let pull_button = gtk::Button::with_label("Pull");
+    header.pack_end(&pull_button);
+
+    let push_button = gtk::Button::with_label("Push");
+    header.pack_end(&push_button);
+
+    let stash_button = gtk::Button::with_label("Stash");
+    header.pack_end(&stash_button);
+
+    let theme_switch = gtk::Switch::new();
+    header.pack_end(&theme_switch);
+
+    let settings = gtk::Settings::default().expect("Could not get default settings");
+    settings.set_gtk_application_prefer_dark_theme(true);
+    theme_switch.set_active(true);
+    {
+        let settings = settings.clone();
+        theme_switch.connect_active_notify(move |sw| {
+            settings.set_gtk_application_prefer_dark_theme(sw.is_active());
+        });
+    }
+
     // Main layout
     let paned = gtk::Paned::builder()
         .orientation(Orientation::Horizontal)
@@ -48,12 +77,16 @@ pub fn build_ui(app: &Application) {
 
     let commit_list = CommitList::new();
     let details = CommitDetails::new();
+    let side_panel = SidePanel::new();
 
     left_scrolled.set_child(Some(commit_list.widget()));
     right.set_child(Some(details.widget()));
 
     let load_more_button = gtk::Button::with_label("Charger plus");
+    let search_entry = gtk::SearchEntry::new();
+    search_entry.set_placeholder_text(Some("Rechercher"));
     let left_box = gtk::Box::new(Orientation::Vertical, 0);
+    left_box.append(&search_entry);
     left_box.append(&left_scrolled);
     left_box.append(&load_more_button);
 
@@ -61,11 +94,26 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&right));
     paned.set_position(420);
 
+    let outer = gtk::Paned::builder()
+        .orientation(Orientation::Horizontal)
+        .start_child(side_panel.widget())
+        .end_child(&paned)
+        .wide_handle(true)
+        .build();
+    outer.set_position(200);
+
     let content = gtk::Box::new(Orientation::Vertical, 0);
     content.append(&header);
-    content.append(&paned);
+    content.append(&outer);
 
     window.set_content(Some(&content));
+
+    {
+        let commit_list_c = commit_list.clone();
+        search_entry.connect_search_changed(move |entry| {
+            commit_list_c.filter(&entry.text());
+        });
+    }
 
     // State
     #[derive(Default, Clone)]
@@ -81,9 +129,11 @@ pub fn build_ui(app: &Application) {
         state: &Rc<RefCell<State>>,
         commit_list: &CommitList,
         details: &CommitDetails,
+        side: &SidePanel,
         branch_combo: &gtk::ComboBoxText,
         title_label: &gtk::Label,
         load_more: &gtk::Button,
+        search_entry: &gtk::SearchEntry,
     ) {
         match RepoHandle::open(path) {
             Ok(repo) => {
@@ -108,6 +158,13 @@ pub fn build_ui(app: &Application) {
                     }
                 }
 
+                if let Ok(statuses) = repo.list_branches_with_upstream() {
+                    side.load_branches(&statuses);
+                }
+                if let Ok(remotes) = repo.list_remotes() {
+                    side.load_remotes(&remotes);
+                }
+
                 let mut st = state.borrow_mut();
                 st.repo_path = Some(path.to_string());
                 st.loaded = 0;
@@ -117,6 +174,8 @@ pub fn build_ui(app: &Application) {
                     details.clear();
                     st.loaded = commits.len();
                     load_more.set_sensitive(commits.len() == PAGE_SIZE);
+                    search_entry.set_text("");
+                    commit_list.filter("");
                 }
             }
             Err(err) => eprintln!("Erreur d'ouverture du dépôt: {err}"),
@@ -128,9 +187,11 @@ pub fn build_ui(app: &Application) {
         let state = state.clone();
         let commit_list_c = commit_list.clone();
         let details_c = details.clone();
+        let side_c = side_panel.clone();
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
         refresh_button.connect_clicked(move |_| {
             let path_opt = { state.borrow().repo_path.clone() };
             if let Some(path) = path_opt {
@@ -139,10 +200,64 @@ pub fn build_ui(app: &Application) {
                     &state,
                     &commit_list_c,
                     &details_c,
+                    &side_c,
                     &branch_combo_c,
                     &title_label_c,
                     &load_more_c,
+                    &search_entry_c,
                 );
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        fetch_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.fetch() {
+                        eprintln!("Fetch error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        pull_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.pull() {
+                        eprintln!("Pull error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        push_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.push() {
+                        eprintln!("Push error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        stash_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.stash("WIP") {
+                        eprintln!("Stash error: {err}");
+                    }
+                }
             }
         });
     }
@@ -152,9 +267,11 @@ pub fn build_ui(app: &Application) {
         let window = window.clone();
         let commit_list_c = commit_list.clone();
         let details_c = details.clone();
+        let side_c = side_panel.clone();
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
 
         // Holder pour garder le dialog vivant jusqu'à la réponse
         let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
@@ -178,6 +295,7 @@ pub fn build_ui(app: &Application) {
                 let branch_combo_c2 = branch_combo_c.clone();
                 let title_label_c2 = title_label_c.clone();
                 let load_more_c2 = load_more_c.clone();
+                let search_entry_c2 = search_entry_c.clone();
                 let holder = dialog_holder.clone();
 
                 move |dlg, resp| {
@@ -191,10 +309,12 @@ pub fn build_ui(app: &Application) {
                                     &state_for_dialog_cb,
                                     &commit_list_c,
                                     &details_c,
+                                    &side_c,
                                     &branch_combo_c2,
                                     &title_label_c2,
                                     &load_more_c2,
-                                );
+                                    &search_entry_c2,
+                                    );
                             }
                         }
                     }
@@ -210,6 +330,7 @@ pub fn build_ui(app: &Application) {
         let state = state.clone();
         let commit_list_c = commit_list.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
         load_more_button.connect_clicked(move |_| {
             let (path_opt, offset) = {
                 let st = state.borrow();
@@ -224,6 +345,7 @@ pub fn build_ui(app: &Application) {
                             commit_list_c.append(commits.clone());
                             state.borrow_mut().loaded += commits.len();
                             load_more_c.set_sensitive(commits.len() == PAGE_SIZE);
+                            commit_list_c.filter(&search_entry_c.text());
                         }
                     }
                 }
@@ -253,9 +375,11 @@ pub fn build_ui(app: &Application) {
             &state,
             &commit_list,
             &details,
+            &side_panel,
             &branch_combo,
             &title_label,
             &load_more_button,
+            &search_entry,
         );
     }
 
