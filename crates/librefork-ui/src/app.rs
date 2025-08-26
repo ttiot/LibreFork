@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use adw::{Application, ApplicationWindow, HeaderBar};
+use adw::{Application, ApplicationWindow, HeaderBar, StyleManager};
 use gtk::Orientation;
 use gtk4 as gtk;
 use librefork_core::RepoHandle;
@@ -48,13 +48,18 @@ pub fn build_ui(app: &Application) {
     let theme_switch = gtk::Switch::new();
     header.pack_end(&theme_switch);
 
-    let settings = gtk::Settings::default().expect("Could not get default settings");
-    settings.set_gtk_application_prefer_dark_theme(true);
+    // let settings = gtk::Settings::default().expect("Could not get default settings");
+    let style_manager = StyleManager::default();
+    // settings.set_gtk_application_prefer_dark_theme(true);
     theme_switch.set_active(true);
     {
-        let settings = settings.clone();
+        // let settings = settings.clone();
         theme_switch.connect_active_notify(move |sw| {
-            settings.set_gtk_application_prefer_dark_theme(sw.is_active());
+            if sw.is_active() {
+                style_manager.set_color_scheme(adw::ColorScheme::ForceDark);
+            } else {
+                style_manager.set_color_scheme(adw::ColorScheme::ForceLight);
+            }
         });
     }
 
@@ -242,7 +247,7 @@ pub fn build_ui(app: &Application) {
         push_button.connect_clicked(move |_| {
             if let Some(path) = state.borrow().repo_path.clone() {
                 if let Ok(repo) = RepoHandle::open(&path) {
-                    if let Err(err) = repo.push() {
+                    if let Err(err) = repo.pull() {
                         eprintln!("Push error: {err}");
                     }
                 }
@@ -254,7 +259,7 @@ pub fn build_ui(app: &Application) {
         let state = state.clone();
         stash_button.connect_clicked(move |_| {
             if let Some(path) = state.borrow().repo_path.clone() {
-                if let Ok(repo) = RepoHandle::open(&path) {
+                if let Ok(mut repo) = RepoHandle::open(&path) {
                     if let Err(err) = repo.stash("WIP") {
                         eprintln!("Stash error: {err}");
                     }
@@ -264,69 +269,68 @@ pub fn build_ui(app: &Application) {
     }
 
     {
+    let state_for_dialog = state.clone();
+    let window = window.clone();
+    let commit_list_c = commit_list.clone();
+    let details_c = details.clone();
+    let side_c_cloned = side_panel.clone(); // Clone du Rc ici
+    let branch_combo_c = branch_combo.clone();
+    let title_label_c = title_label.clone();
+    let load_more_c = load_more_button.clone();
+    let search_entry_c = search_entry.clone();
 
-        let state_for_dialog = state.clone();
-        let window = window.clone();
-        let commit_list_c = commit_list.clone();
-        let details_c = details.clone();
-        let side_c = side_panel.clone();
-        let branch_combo_c = branch_combo.clone();
-        let title_label_c = title_label.clone();
-        let load_more_c = load_more_button.clone();
-        let search_entry_c = search_entry.clone();
+    // Holder pour garder le dialog vivant jusqu'à la réponse
+    let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
+        Rc::new(RefCell::new(None));
 
-        // Holder pour garder le dialog vivant jusqu'à la réponse
-        let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
-            Rc::new(RefCell::new(None));
+    open_button.connect_clicked(move |_| {
+        let dialog = gtk::FileChooserNative::builder()
+            .title("Ouvrir un dépôt Git")
+            .action(gtk::FileChooserAction::SelectFolder)
+            .transient_for(&window) // parent
+            .modal(true)
+            .build();
 
-        open_button.connect_clicked(move |_| {
-            let dialog = gtk::FileChooserNative::builder()
-                .title("Ouvrir un dépôt Git")
-                .action(gtk::FileChooserAction::SelectFolder)
-                .transient_for(&window) // parent
-                .modal(true)
-                .build();
+        // conservez une ref forte
+        *dialog_holder.borrow_mut() = Some(dialog.clone());
 
-            // conservez une ref forte
-            *dialog_holder.borrow_mut() = Some(dialog.clone());
+        dialog.connect_response({
+            let state_for_dialog_cb = state_for_dialog.clone();
+            let commit_list_c = commit_list_c.clone();
+            let details_c = details_c.clone();
+            let side_c_cloned = side_c_cloned.clone(); // Cloner ici
+            let branch_combo_c2 = branch_combo_c.clone();
+            let title_label_c2 = title_label_c.clone();
+            let load_more_c2 = load_more_c.clone();
+            let search_entry_c2 = search_entry_c.clone();
+            let holder = dialog_holder.clone();
 
-            dialog.connect_response({
-                let state_for_dialog_cb = state_for_dialog.clone();
-                let commit_list_c = commit_list_c.clone();
-                let details_c = details_c.clone();
-                let branch_combo_c2 = branch_combo_c.clone();
-                let title_label_c2 = title_label_c.clone();
-                let load_more_c2 = load_more_c.clone();
-                let search_entry_c2 = search_entry_c.clone();
-                let holder = dialog_holder.clone();
+            move |dlg, resp| {
+                holder.borrow_mut().take();
 
-                move |dlg, resp| {
-                    holder.borrow_mut().take();
-
-                    if resp == gtk::ResponseType::Accept {
-                        if let Some(file) = dlg.file() {
-                            if let Some(path) = file.path() {
-                                load_repo(
-                                    path.to_string_lossy().as_ref(),
-                                    &state_for_dialog_cb,
-                                    &commit_list_c,
-                                    &details_c,
-                                    &side_c,
-                                    &branch_combo_c2,
-                                    &title_label_c2,
-                                    &load_more_c2,
-                                    &search_entry_c2,
-                                    );
-
-                            }
+                if resp == gtk::ResponseType::Accept {
+                    if let Some(file) = dlg.file() {
+                        if let Some(path) = file.path() {
+                            load_repo(
+                                path.to_string_lossy().as_ref(),
+                                &state_for_dialog_cb,
+                                &commit_list_c,
+                                &details_c,
+                                &side_c_cloned, // Utilisation du clone ici
+                                &branch_combo_c2,
+                                &title_label_c2,
+                                &load_more_c2,
+                                &search_entry_c2,
+                            );
                         }
                     }
                 }
-            });
-
-            dialog.show();
+            }
         });
-    }
+
+        dialog.show();
+    });
+}
 
     // Load more commits
     {

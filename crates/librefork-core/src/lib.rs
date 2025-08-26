@@ -385,10 +385,9 @@ impl RepoHandle {
         Ok(())
     }
 
-    pub fn stash(&self, message: &str) -> Result<()> {
+    pub fn stash(&mut self, message: &str) -> Result<()> {
         let sig = self.repo.signature()?;
         self.repo.stash_save(&sig, message, None)?;
         Ok(())
     }
-
 }
