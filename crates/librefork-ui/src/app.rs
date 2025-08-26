@@ -238,6 +238,7 @@ pub fn build_ui(app: &Application) {
 
     {
         let state = state.clone();
+
         push_button.connect_clicked(move |_| {
             if let Some(path) = state.borrow().repo_path.clone() {
                 if let Ok(repo) = RepoHandle::open(&path) {
@@ -263,6 +264,7 @@ pub fn build_ui(app: &Application) {
     }
 
     {
+
         let state_for_dialog = state.clone();
         let window = window.clone();
         let commit_list_c = commit_list.clone();
@@ -315,6 +317,7 @@ pub fn build_ui(app: &Application) {
                                     &load_more_c2,
                                     &search_entry_c2,
                                     );
+
                             }
                         }
                     }

@@ -385,18 +385,10 @@ impl RepoHandle {
         Ok(())
     }
 
-    pub fn push(&self) -> Result<()> {
-        if let Some(branch) = self.head()? {
-            let mut remote = self.repo.find_remote("origin")?;
-            let refspec = format!("refs/heads/{0}:refs/heads/{0}", branch);
-            remote.push(&[refspec.as_str()], None)?;
-        }
-        Ok(())
-    }
-
     pub fn stash(&self, message: &str) -> Result<()> {
         let sig = self.repo.signature()?;
         self.repo.stash_save(&sig, message, None)?;
         Ok(())
     }
+
 }

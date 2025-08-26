@@ -141,6 +141,7 @@ impl CommitList {
                         || c.short_id.contains(&q)
                         || c.oid.contains(&q)
                 })
+
                 .cloned()
                 .collect();
             self.reload_list(&filtered);
