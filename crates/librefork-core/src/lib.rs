@@ -311,4 +311,19 @@ impl RepoHandle {
             .apply(&diff, ApplyLocation::Index, None)
             .map_err(|e| e.into())
     }
+
+    pub fn fetch(&self) -> Result<()> {
+        let mut remote = self.repo.find_remote("origin")?;
+        remote.fetch(&[] as &[&str], None, None)?;
+        Ok(())
+    }
+
+    pub fn push(&self) -> Result<()> {
+        if let Some(branch) = self.head()? {
+            let mut remote = self.repo.find_remote("origin")?;
+            let refspec = format!("refs/heads/{0}:refs/heads/{0}", branch);
+            remote.push(&[refspec.as_str()], None)?;
+        }
+        Ok(())
+    }
 }
