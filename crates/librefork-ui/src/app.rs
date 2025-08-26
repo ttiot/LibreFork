@@ -6,7 +6,11 @@ use librefork_core::RepoHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::widgets::{commit_details::CommitDetails, commit_list::CommitList};
+use crate::widgets::{
+    commit_details::CommitDetails,
+    commit_list::CommitList,
+    side_panel::SidePanel,
+};
 
 pub fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
@@ -32,8 +36,14 @@ pub fn build_ui(app: &Application) {
     let fetch_button = gtk::Button::with_label("Fetch");
     header.pack_end(&fetch_button);
 
+    let pull_button = gtk::Button::with_label("Pull");
+    header.pack_end(&pull_button);
+
     let push_button = gtk::Button::with_label("Push");
     header.pack_end(&push_button);
+
+    let stash_button = gtk::Button::with_label("Stash");
+    header.pack_end(&stash_button);
 
     let theme_switch = gtk::Switch::new();
     header.pack_end(&theme_switch);
@@ -67,6 +77,7 @@ pub fn build_ui(app: &Application) {
 
     let commit_list = CommitList::new();
     let details = CommitDetails::new();
+    let side_panel = SidePanel::new();
 
     left_scrolled.set_child(Some(commit_list.widget()));
     right.set_child(Some(details.widget()));
@@ -83,9 +94,17 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&right));
     paned.set_position(420);
 
+    let outer = gtk::Paned::builder()
+        .orientation(Orientation::Horizontal)
+        .start_child(side_panel.widget())
+        .end_child(&paned)
+        .wide_handle(true)
+        .build();
+    outer.set_position(200);
+
     let content = gtk::Box::new(Orientation::Vertical, 0);
     content.append(&header);
-    content.append(&paned);
+    content.append(&outer);
 
     window.set_content(Some(&content));
 
@@ -110,6 +129,7 @@ pub fn build_ui(app: &Application) {
         state: &Rc<RefCell<State>>,
         commit_list: &CommitList,
         details: &CommitDetails,
+        side: &SidePanel,
         branch_combo: &gtk::ComboBoxText,
         title_label: &gtk::Label,
         load_more: &gtk::Button,
@@ -138,6 +158,13 @@ pub fn build_ui(app: &Application) {
                     }
                 }
 
+                if let Ok(statuses) = repo.list_branches_with_upstream() {
+                    side.load_branches(&statuses);
+                }
+                if let Ok(remotes) = repo.list_remotes() {
+                    side.load_remotes(&remotes);
+                }
+
                 let mut st = state.borrow_mut();
                 st.repo_path = Some(path.to_string());
                 st.loaded = 0;
@@ -160,6 +187,7 @@ pub fn build_ui(app: &Application) {
         let state = state.clone();
         let commit_list_c = commit_list.clone();
         let details_c = details.clone();
+        let side_c = side_panel.clone();
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
@@ -172,6 +200,7 @@ pub fn build_ui(app: &Application) {
                     &state,
                     &commit_list_c,
                     &details_c,
+                    &side_c,
                     &branch_combo_c,
                     &title_label_c,
                     &load_more_c,
@@ -196,6 +225,20 @@ pub fn build_ui(app: &Application) {
 
     {
         let state = state.clone();
+        pull_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.pull() {
+                        eprintln!("Pull error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+
         push_button.connect_clicked(move |_| {
             if let Some(path) = state.borrow().repo_path.clone() {
                 if let Ok(repo) = RepoHandle::open(&path) {
@@ -208,10 +251,25 @@ pub fn build_ui(app: &Application) {
     }
 
     {
+        let state = state.clone();
+        stash_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.stash("WIP") {
+                        eprintln!("Stash error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+
         let state_for_dialog = state.clone();
         let window = window.clone();
         let commit_list_c = commit_list.clone();
         let details_c = details.clone();
+        let side_c = side_panel.clone();
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
@@ -253,11 +311,13 @@ pub fn build_ui(app: &Application) {
                                     &state_for_dialog_cb,
                                     &commit_list_c,
                                     &details_c,
+                                    &side_c,
                                     &branch_combo_c2,
                                     &title_label_c2,
                                     &load_more_c2,
                                     &search_entry_c2,
-                                );
+                                    );
+
                             }
                         }
                     }
@@ -318,6 +378,7 @@ pub fn build_ui(app: &Application) {
             &state,
             &commit_list,
             &details,
+            &side_panel,
             &branch_combo,
             &title_label,
             &load_more_button,

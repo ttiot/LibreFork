@@ -73,6 +73,10 @@ impl CommitList {
         summary.set_xalign(0.0);
         summary.set_ellipsize(pango::EllipsizeMode::End);
         summary.set_hexpand(true);
+        let lowered = c.summary.to_lowercase();
+        if lowered.contains("crash") {
+            summary.add_css_class("commit-warning");
+        }
 
         top.append(&graph);
         top.append(&hash);
@@ -128,9 +132,16 @@ impl CommitList {
         if query.is_empty() {
             self.reload_list(&all);
         } else {
+            let q = query.to_lowercase();
             let filtered: Vec<CommitInfo> = all
                 .iter()
-                .filter(|c| c.summary.contains(query) || c.author.contains(query))
+                .filter(|c| {
+                    c.summary.to_lowercase().contains(&q)
+                        || c.author.to_lowercase().contains(&q)
+                        || c.short_id.contains(&q)
+                        || c.oid.contains(&q)
+                })
+
                 .cloned()
                 .collect();
             self.reload_list(&filtered);

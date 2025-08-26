@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use git2::{ApplyLocation, BranchType, Oid, Patch, Repository, Sort};
+use git2::{ApplyLocation, BranchType, Delta, Oid, Patch, Repository, Sort};
 use std::path::Path;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -24,7 +24,15 @@ pub struct DiffLine {
 #[derive(Debug, Clone)]
 pub struct FileDiff {
     pub path: String,
+    pub status: String,
     pub lines: Vec<DiffLine>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BranchStatus {
+    pub name: String,
+    pub ahead: usize,
+    pub behind: usize,
 }
 
 pub struct RepoHandle {
@@ -68,6 +76,40 @@ impl RepoHandle {
             }
         }
         Ok(names)
+    }
+
+    pub fn list_branches_with_upstream(&self) -> Result<Vec<BranchStatus>> {
+        let mut result = Vec::new();
+        for branch in self.repo.branches(Some(BranchType::Local))? {
+            let (b, _) = branch?;
+            if let Some(name) = b.name()? {
+                let mut ahead = 0;
+                let mut behind = 0;
+                if let Ok(upstream) = b.upstream() {
+                    if let (Some(lo), Some(ro)) = (b.get().target(), upstream.get().target()) {
+                        let (a, d) = self.repo.graph_ahead_behind(lo, ro)?;
+                        ahead = a;
+                        behind = d;
+                    }
+                }
+                result.push(BranchStatus {
+                    name: name.to_string(),
+                    ahead,
+                    behind,
+                });
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn list_remotes(&self) -> Result<Vec<String>> {
+        let mut remotes = Vec::new();
+        if let Ok(names) = self.repo.remotes() {
+            for name in names.iter().flatten() {
+                remotes.push(name.to_string());
+            }
+        }
+        Ok(remotes)
     }
 
     pub fn list_commits_paginated(&self, skip: usize, max: usize) -> Result<Vec<CommitInfo>> {
@@ -264,6 +306,13 @@ impl RepoHandle {
                 .to_string_lossy()
                 .to_string();
 
+            let status = match delta.status() {
+                Delta::Added => "A",
+                Delta::Deleted => "D",
+                Delta::Modified => "M",
+                _ => "?",
+            };
+
             if let Some(patch) = Patch::from_diff(&diff, i)? {
                 let mut lines = Vec::new();
                 for hunk_idx in 0..patch.num_hunks() {
@@ -291,7 +340,11 @@ impl RepoHandle {
                         }
                     }
                 }
-                files.push(FileDiff { path, lines });
+                files.push(FileDiff {
+                    path,
+                    status: status.to_string(),
+                    lines,
+                });
             }
         }
 
@@ -318,12 +371,24 @@ impl RepoHandle {
         Ok(())
     }
 
-    pub fn push(&self) -> Result<()> {
+    pub fn pull(&self) -> Result<()> {
+        self.fetch()?;
         if let Some(branch) = self.head()? {
-            let mut remote = self.repo.find_remote("origin")?;
-            let refspec = format!("refs/heads/{0}:refs/heads/{0}", branch);
-            remote.push(&[refspec.as_str()], None)?;
+            let local_ref = format!("refs/heads/{}", branch);
+            let remote_ref = format!("refs/remotes/origin/{}", branch);
+            if let Ok(oid) = self.repo.refname_to_id(&remote_ref) {
+                if let Ok(mut reference) = self.repo.find_reference(&local_ref) {
+                    reference.set_target(oid, "fast-forward")?;
+                }
+            }
         }
         Ok(())
     }
+
+    pub fn stash(&self, message: &str) -> Result<()> {
+        let sig = self.repo.signature()?;
+        self.repo.stash_save(&sig, message, None)?;
+        Ok(())
+    }
+
 }
