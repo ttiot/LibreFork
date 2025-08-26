@@ -18,9 +18,7 @@ pub fn build_ui(app: &Application) {
 
     // Header
     let title_label = gtk::Label::new(Some("LibreFork"));
-    let header = HeaderBar::builder()
-        .title_widget(&title_label)
-        .build();
+    let header = HeaderBar::builder().title_widget(&title_label).build();
     let open_button = gtk::Button::with_label("Ouvrir un dépôt…");
     open_button.add_css_class("suggested-action");
     header.pack_start(&open_button);
@@ -134,7 +132,8 @@ pub fn build_ui(app: &Application) {
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
         refresh_button.connect_clicked(move |_| {
-            if let Some(path) = state.borrow().repo_path.clone() {
+            let path_opt = { state.borrow().repo_path.clone() };
+            if let Some(path) = path_opt {
                 load_repo(
                     &path,
                     &state,
@@ -212,9 +211,12 @@ pub fn build_ui(app: &Application) {
         let commit_list_c = commit_list.clone();
         let load_more_c = load_more_button.clone();
         load_more_button.connect_clicked(move |_| {
-            if let Some(path) = state.borrow().repo_path.clone() {
+            let (path_opt, offset) = {
+                let st = state.borrow();
+                (st.repo_path.clone(), st.loaded)
+            };
+            if let Some(path) = path_opt {
                 if let Ok(repo) = RepoHandle::open(&path) {
-                    let offset = state.borrow().loaded;
                     if let Ok(commits) = repo.list_commits_paginated(offset, PAGE_SIZE) {
                         if commits.is_empty() {
                             load_more_c.set_sensitive(false);
@@ -236,8 +238,8 @@ pub fn build_ui(app: &Application) {
         commit_list.connect_on_select(move |oid| {
             if let Some(path) = state_for_select.borrow().repo_path.clone() {
                 if let Ok(repo) = RepoHandle::open(&path) {
-                    if let Ok((info, message)) = repo.get_commit_details(oid) {
-                        details_c.show_commit(&info, &message);
+                    if let Ok((info, message, diff)) = repo.get_commit_details(oid) {
+                        details_c.show_commit(&info, &message, &diff);
                     }
                 }
             }

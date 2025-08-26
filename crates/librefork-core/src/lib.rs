@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use git2::{BranchType, Oid, Repository, Sort};
+use git2::{ApplyLocation, BranchType, Oid, Patch, Repository, Sort};
+use std::path::Path;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Debug, Clone)]
@@ -12,6 +13,18 @@ pub struct CommitInfo {
     pub time: String,
     pub parents: usize,
     pub refs: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffLine {
+    pub left: Option<String>,
+    pub right: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileDiff {
+    pub path: String,
+    pub lines: Vec<DiffLine>,
 }
 
 pub struct RepoHandle {
@@ -184,7 +197,7 @@ impl RepoHandle {
         Ok(commits)
     }
 
-    pub fn get_commit_details(&self, oid_str: &str) -> Result<(CommitInfo, String)> {
+    pub fn get_commit_details(&self, oid_str: &str) -> Result<(CommitInfo, String, Vec<FileDiff>)> {
         let oid = Oid::from_str(oid_str)?;
         let commit = self.repo.find_commit(oid)?;
         let author = commit.author();
@@ -229,6 +242,73 @@ impl RepoHandle {
         };
 
         let message = commit.message().unwrap_or("").to_string();
-        Ok((info, message))
+
+        let tree = commit.tree()?;
+        let parent_tree = if commit.parent_count() > 0 {
+            Some(commit.parent(0)?.tree()?)
+        } else {
+            None
+        };
+
+        let diff = self
+            .repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+
+        let mut files = Vec::new();
+        for (i, delta) in diff.deltas().enumerate() {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+
+            if let Some(patch) = Patch::from_diff(&diff, i)? {
+                let mut lines = Vec::new();
+                for hunk_idx in 0..patch.num_hunks() {
+                    let (_hunk, _) = patch.hunk(hunk_idx).unwrap();
+                    for line_idx in 0..patch.num_lines_in_hunk(hunk_idx)? {
+                        let line = patch.line_in_hunk(hunk_idx, line_idx).unwrap();
+                        let content = std::str::from_utf8(line.content())
+                            .unwrap_or("")
+                            .trim_end_matches('\n')
+                            .to_string();
+                        match line.origin() {
+                            '-' => lines.push(DiffLine {
+                                left: Some(content),
+                                right: None,
+                            }),
+                            '+' => lines.push(DiffLine {
+                                left: None,
+                                right: Some(content),
+                            }),
+                            ' ' => lines.push(DiffLine {
+                                left: Some(content.clone()),
+                                right: Some(content),
+                            }),
+                            _ => {}
+                        }
+                    }
+                }
+                files.push(FileDiff { path, lines });
+            }
+        }
+
+        Ok((info, message, files))
+    }
+
+    pub fn stage_file(&self, path: &str) -> Result<()> {
+        let mut index = self.repo.index()?;
+        index.add_path(Path::new(path))?;
+        index.write()?;
+        Ok(())
+    }
+
+    pub fn stage_hunk(&self, patch_text: &str) -> Result<()> {
+        let diff = git2::Diff::from_buffer(patch_text.as_bytes())?;
+        self.repo
+            .apply(&diff, ApplyLocation::Index, None)
+            .map_err(|e| e.into())
     }
 }

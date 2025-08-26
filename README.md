@@ -18,8 +18,8 @@ cargo run -p librefork-ui -- --repo /chemin/vers/mon/repo
 - [x] Squelette Rust + GTK4
 - [x] Liste de commits (revwalk topo + temps)
 - [x] Détails d’un commit sélectionné
-- [ ] Diff viewer unifié → side-by-side
-- [ ] Staging par fichier, puis par hunk
+- [x] Diff viewer unifié → side-by-side
+- [x] Staging par fichier, puis par hunk
 - [ ] Fetch/Pull/Push (progress UI)
 - [ ] Rebase interactif (pick/squash/fixup)
 - [ ] Stash manager
