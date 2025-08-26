@@ -1,7 +1,7 @@
 .dim-label { opacity: 0.7; }
 .commit-warning { color: #f57900; }
 .tag-label {
-    background-color: #3584e4;
+    background-color: rgba(53, 132, 228, 0.8);
     color: white;
     border-radius: 4px;
     padding: 0 4px;

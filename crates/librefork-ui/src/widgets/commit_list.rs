@@ -39,7 +39,6 @@ impl CommitList {
         root.set_hexpand(true);
         root.set_vexpand(true);
         let list = gtk::ListBox::new();
-        list.add_css_class("boxed-list");
         list.set_selection_mode(gtk::SelectionMode::Single);
         list.set_vexpand(true);
 
@@ -72,10 +71,12 @@ impl CommitList {
 
     fn row_from_commit(c: &CommitInfo, g: &GraphRowData) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
+        row.set_margin_top(0);
+        row.set_margin_bottom(0);
 
         let row_box = gtk::Box::new(Orientation::Horizontal, 8);
-        row_box.set_margin_top(4);
-        row_box.set_margin_bottom(4);
+        row_box.set_margin_top(0);
+        row_box.set_margin_bottom(0);
         row_box.set_margin_start(8);
         row_box.set_margin_end(8);
 
@@ -130,6 +131,16 @@ impl CommitList {
 
         let message_box = gtk::Box::new(Orientation::Horizontal, 4);
         message_box.set_hexpand(true);
+
+        let tag_box = gtk::Box::new(Orientation::Horizontal, 4);
+        tag_box.set_valign(gtk::Align::Center);
+        for r in &c.refs {
+            let tag = gtk::Label::new(Some(r));
+            tag.add_css_class("tag-label");
+            tag_box.append(&tag);
+        }
+        message_box.append(&tag_box);
+
         let summary = gtk::Label::new(Some(&c.summary));
         summary.set_xalign(0.0);
         summary.set_ellipsize(pango::EllipsizeMode::End);
@@ -140,15 +151,6 @@ impl CommitList {
             summary.add_css_class("commit-warning");
         }
         message_box.append(&summary);
-
-        let tag_box = gtk::Box::new(Orientation::Horizontal, 4);
-        tag_box.set_valign(gtk::Align::Center);
-        for r in &c.refs {
-            let tag = gtk::Label::new(Some(r));
-            tag.add_css_class("tag-label");
-            tag_box.append(&tag);
-        }
-        message_box.append(&tag_box);
 
         let author = gtk::Label::new(Some(&c.author));
         author.add_css_class("dim-label");
@@ -161,7 +163,13 @@ impl CommitList {
         hash.set_xalign(0.0);
         hash.set_valign(gtk::Align::Center);
 
-        let date = gtk::Label::new(Some(&c.time));
+        let date_str = glib::DateTime::from_iso8601(&c.time, None)
+            .ok()
+            .and_then(|dt| dt.to_timezone(&glib::TimeZone::local()).ok())
+            .and_then(|dt| dt.format("%c").ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| c.time.clone());
+        let date = gtk::Label::new(Some(&date_str));
         date.add_css_class("dim-label");
         date.set_xalign(0.0);
         date.set_valign(gtk::Align::Center);
@@ -238,7 +246,8 @@ impl CommitList {
         for c in commits {
             let active_before = lanes.clone();
 
-            let node_lane = if let Some(idx) = lanes.iter().position(|o| o.as_ref() == Some(&c.oid)) {
+            let node_lane = if let Some(idx) = lanes.iter().position(|o| o.as_ref() == Some(&c.oid))
+            {
                 idx
             } else {
                 let idx = lanes.iter().position(|o| o.is_none()).unwrap_or_else(|| {
