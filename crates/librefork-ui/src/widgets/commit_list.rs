@@ -17,9 +17,12 @@ pub struct CommitList {
 impl CommitList {
     pub fn new() -> Self {
         let root = gtk::Box::new(Orientation::Vertical, 0);
+        root.set_hexpand(true);
+        root.set_vexpand(true);
         let list = gtk::ListBox::new();
         list.add_css_class("boxed-list");
         list.set_selection_mode(gtk::SelectionMode::Single);
+        list.set_vexpand(true);
 
         root.append(&list);
 
@@ -42,48 +45,68 @@ impl CommitList {
         self.root.upcast_ref()
     }
 
+    fn row_from_commit(c: CommitInfo) -> gtk::ListBoxRow {
+        let row = gtk::ListBoxRow::new();
+
+        let row_box = gtk::Box::new(Orientation::Vertical, 4);
+        row_box.set_margin_top(8);
+        row_box.set_margin_bottom(8);
+        row_box.set_margin_start(8);
+        row_box.set_margin_end(8);
+
+        let top = gtk::Box::new(Orientation::Horizontal, 8);
+        let graph = gtk::Label::new(Some("●"));
+        graph.add_css_class("monospace");
+        graph.set_xalign(0.0);
+
+        let hash = gtk::Label::new(Some(&format!("{}", c.short_id)));
+        hash.add_css_class("monospace");
+        hash.set_xalign(0.0);
+
+        let summary = gtk::Label::new(Some(&c.summary));
+        summary.set_xalign(0.0);
+        summary.set_ellipsize(pango::EllipsizeMode::End);
+        summary.set_hexpand(true);
+
+        top.append(&graph);
+        top.append(&hash);
+        top.append(&summary);
+
+        let refs = if c.refs.is_empty() {
+            String::new()
+        } else {
+            format!(" • refs: {}", c.refs.join(", "))
+        };
+        let bottom = gtk::Label::new(Some(&format!(
+            "{} <{}> • {} • {} parents{}",
+            c.author, c.email, c.time, c.parents, refs
+        )));
+        bottom.add_css_class("dim-label");
+        bottom.set_xalign(0.0);
+
+        row_box.append(&top);
+        row_box.append(&bottom);
+
+        row.set_child(Some(&row_box));
+        row.set_widget_name(&c.oid);
+
+        row
+    }
+
     pub fn load(&self, commits: Vec<CommitInfo>) {
-        // Clear
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
 
         for c in commits {
-            let row = gtk::ListBoxRow::new();
+            let row = Self::row_from_commit(c);
+            self.list.append(&row);
+        }
+    }
 
-            // Layout for each row
-            let row_box = gtk::Box::new(Orientation::Vertical, 4);
-            row_box.set_margin_top(8);
-            row_box.set_margin_bottom(8);
-            row_box.set_margin_start(8);
-            row_box.set_margin_end(8);
-
-            let top = gtk::Box::new(Orientation::Horizontal, 8);
-            let hash = gtk::Label::new(Some(&format!("{}", c.short_id)));
-            hash.add_css_class("monospace");
-            hash.set_xalign(0.0);
-
-            let summary = gtk::Label::new(Some(&c.summary));
-            summary.set_xalign(0.0);
-            summary.set_ellipsize(pango::EllipsizeMode::End);
-            summary.set_hexpand(true);
-
-            top.append(&hash);
-            top.append(&summary);
-
-            let refs = if c.refs.is_empty() { String::new() } else { format!(" • refs: {}", c.refs.join(", ")) };
-            let bottom = gtk::Label::new(Some(&format!("{} <{}> • {} • {} parents{}",
-                c.author, c.email, c.time, c.parents, refs
-            )));
-            bottom.add_css_class("dim-label");
-            bottom.set_xalign(0.0);
-
-            row_box.append(&top);
-            row_box.append(&bottom);
-
-            row.set_child(Some(&row_box));
-            row.set_widget_name(&c.oid);
-
+    pub fn append(&self, commits: Vec<CommitInfo>) {
+        for c in commits {
+            let row = Self::row_from_commit(c);
             self.list.append(&row);
         }
     }
