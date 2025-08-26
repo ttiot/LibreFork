@@ -145,7 +145,11 @@ impl CommitDetails {
         };
         self.meta.set_text(&format!(
             "{} <{}> • {} • {} parents{}",
-            info.author, info.email, info.time, info.parents, refs
+            info.author,
+            info.email,
+            info.time,
+            info.parents.len(),
+            refs
         ));
         self.message.buffer().set_text(message);
 
