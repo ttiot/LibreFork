@@ -29,6 +29,25 @@ pub fn build_ui(app: &Application) {
     let refresh_button = gtk::Button::with_label("Rafraîchir");
     header.pack_end(&refresh_button);
 
+    let fetch_button = gtk::Button::with_label("Fetch");
+    header.pack_end(&fetch_button);
+
+    let push_button = gtk::Button::with_label("Push");
+    header.pack_end(&push_button);
+
+    let theme_switch = gtk::Switch::new();
+    header.pack_end(&theme_switch);
+
+    let settings = gtk::Settings::default().expect("Could not get default settings");
+    settings.set_gtk_application_prefer_dark_theme(true);
+    theme_switch.set_active(true);
+    {
+        let settings = settings.clone();
+        theme_switch.connect_active_notify(move |sw| {
+            settings.set_gtk_application_prefer_dark_theme(sw.is_active());
+        });
+    }
+
     // Main layout
     let paned = gtk::Paned::builder()
         .orientation(Orientation::Horizontal)
@@ -53,7 +72,10 @@ pub fn build_ui(app: &Application) {
     right.set_child(Some(details.widget()));
 
     let load_more_button = gtk::Button::with_label("Charger plus");
+    let search_entry = gtk::SearchEntry::new();
+    search_entry.set_placeholder_text(Some("Rechercher"));
     let left_box = gtk::Box::new(Orientation::Vertical, 0);
+    left_box.append(&search_entry);
     left_box.append(&left_scrolled);
     left_box.append(&load_more_button);
 
@@ -66,6 +88,13 @@ pub fn build_ui(app: &Application) {
     content.append(&paned);
 
     window.set_content(Some(&content));
+
+    {
+        let commit_list_c = commit_list.clone();
+        search_entry.connect_search_changed(move |entry| {
+            commit_list_c.filter(&entry.text());
+        });
+    }
 
     // State
     #[derive(Default, Clone)]
@@ -84,6 +113,7 @@ pub fn build_ui(app: &Application) {
         branch_combo: &gtk::ComboBoxText,
         title_label: &gtk::Label,
         load_more: &gtk::Button,
+        search_entry: &gtk::SearchEntry,
     ) {
         match RepoHandle::open(path) {
             Ok(repo) => {
@@ -117,6 +147,8 @@ pub fn build_ui(app: &Application) {
                     details.clear();
                     st.loaded = commits.len();
                     load_more.set_sensitive(commits.len() == PAGE_SIZE);
+                    search_entry.set_text("");
+                    commit_list.filter("");
                 }
             }
             Err(err) => eprintln!("Erreur d'ouverture du dépôt: {err}"),
@@ -131,6 +163,7 @@ pub fn build_ui(app: &Application) {
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
         refresh_button.connect_clicked(move |_| {
             let path_opt = { state.borrow().repo_path.clone() };
             if let Some(path) = path_opt {
@@ -142,7 +175,34 @@ pub fn build_ui(app: &Application) {
                     &branch_combo_c,
                     &title_label_c,
                     &load_more_c,
+                    &search_entry_c,
                 );
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        fetch_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.fetch() {
+                        eprintln!("Fetch error: {err}");
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let state = state.clone();
+        push_button.connect_clicked(move |_| {
+            if let Some(path) = state.borrow().repo_path.clone() {
+                if let Ok(repo) = RepoHandle::open(&path) {
+                    if let Err(err) = repo.push() {
+                        eprintln!("Push error: {err}");
+                    }
+                }
             }
         });
     }
@@ -155,6 +215,7 @@ pub fn build_ui(app: &Application) {
         let branch_combo_c = branch_combo.clone();
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
 
         // Holder pour garder le dialog vivant jusqu'à la réponse
         let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
@@ -178,6 +239,7 @@ pub fn build_ui(app: &Application) {
                 let branch_combo_c2 = branch_combo_c.clone();
                 let title_label_c2 = title_label_c.clone();
                 let load_more_c2 = load_more_c.clone();
+                let search_entry_c2 = search_entry_c.clone();
                 let holder = dialog_holder.clone();
 
                 move |dlg, resp| {
@@ -194,6 +256,7 @@ pub fn build_ui(app: &Application) {
                                     &branch_combo_c2,
                                     &title_label_c2,
                                     &load_more_c2,
+                                    &search_entry_c2,
                                 );
                             }
                         }
@@ -210,6 +273,7 @@ pub fn build_ui(app: &Application) {
         let state = state.clone();
         let commit_list_c = commit_list.clone();
         let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
         load_more_button.connect_clicked(move |_| {
             let (path_opt, offset) = {
                 let st = state.borrow();
@@ -224,6 +288,7 @@ pub fn build_ui(app: &Application) {
                             commit_list_c.append(commits.clone());
                             state.borrow_mut().loaded += commits.len();
                             load_more_c.set_sensitive(commits.len() == PAGE_SIZE);
+                            commit_list_c.filter(&search_entry_c.text());
                         }
                     }
                 }
@@ -256,6 +321,7 @@ pub fn build_ui(app: &Application) {
             &branch_combo,
             &title_label,
             &load_more_button,
+            &search_entry,
         );
     }
 
