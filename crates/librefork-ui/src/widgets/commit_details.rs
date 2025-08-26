@@ -9,12 +9,9 @@ pub struct CommitDetails {
     header: gtk::Label,
     meta: gtk::Label,
     message: gtk::TextView,
-    toolbar: gtk::Box,
-    diff_stack: gtk::Stack,
     inline_container: gtk::Box,
     side_container: gtk::Box,
-    inline_button: gtk::ToggleButton,
-    side_button: gtk::ToggleButton,
+    filetree_container: gtk::Box,
 }
 
 impl CommitDetails {
@@ -25,20 +22,32 @@ impl CommitDetails {
         root.set_margin_start(12);
         root.set_margin_end(12);
 
+        let stack = gtk::Stack::new();
+        let switcher = gtk::StackSwitcher::new();
+        switcher.set_stack(Some(&stack));
+        root.append(&switcher);
+        root.append(&stack);
+
+        // Commit tab
+        let commit_box = gtk::Box::new(Orientation::Vertical, 8);
         let header = gtk::Label::new(None);
         header.add_css_class("title-3");
         header.set_xalign(0.0);
-
         let meta = gtk::Label::new(None);
         meta.add_css_class("dim-label");
         meta.set_xalign(0.0);
-
         let message = gtk::TextView::new();
         message.set_editable(false);
         message.set_cursor_visible(false);
         message.set_monospace(true);
         message.set_wrap_mode(gtk::WrapMode::WordChar);
+        commit_box.append(&header);
+        commit_box.append(&meta);
+        commit_box.append(&message);
+        stack.add_titled(&commit_box, Some("commit"), "Commit");
 
+        // Changes tab
+        let changes_box = gtk::Box::new(Orientation::Vertical, 8);
         let toolbar = gtk::Box::new(Orientation::Horizontal, 4);
         let inline_button = gtk::ToggleButton::builder()
             .icon_name("view-list-symbolic")
@@ -67,7 +76,6 @@ impl CommitDetails {
         diff_stack.add_named(&inline_sw, Some("inline"));
         diff_stack.add_named(&side_sw, Some("side"));
         diff_stack.set_visible_child_name("side");
-
         {
             let stack = diff_stack.clone();
             side_button.connect_toggled(move |btn| {
@@ -84,24 +92,27 @@ impl CommitDetails {
                 }
             });
         }
+        changes_box.append(&toolbar);
+        changes_box.append(&diff_stack);
+        stack.add_titled(&changes_box, Some("changes"), "Changes");
 
-        root.append(&header);
-        root.append(&meta);
-        root.append(&message);
-        root.append(&toolbar);
-        root.append(&diff_stack);
+        // Filetree tab
+        let filetree_container = gtk::Box::new(Orientation::Vertical, 4);
+        let filetree_sw = gtk::ScrolledWindow::builder()
+            .hexpand(true)
+            .vexpand(true)
+            .child(&filetree_container)
+            .build();
+        stack.add_titled(&filetree_sw, Some("filetree"), "Filetree");
 
         Self {
             root,
             header,
             meta,
             message,
-            toolbar,
-            diff_stack,
             inline_container,
             side_container,
-            inline_button,
-            side_button,
+            filetree_container,
         }
     }
 
@@ -117,6 +128,9 @@ impl CommitDetails {
             child.unparent();
         }
         while let Some(child) = self.side_container.first_child() {
+            child.unparent();
+        }
+        while let Some(child) = self.filetree_container.first_child() {
             child.unparent();
         }
     }
@@ -139,6 +153,9 @@ impl CommitDetails {
             child.unparent();
         }
         while let Some(child) = self.side_container.first_child() {
+            child.unparent();
+        }
+        while let Some(child) = self.filetree_container.first_child() {
             child.unparent();
         }
 
@@ -237,6 +254,10 @@ impl CommitDetails {
             }
             frame_side.set_child(Some(&view_side));
             self.side_container.append(&frame_side);
+
+            let file_label = gtk::Label::new(Some(&file.path));
+            file_label.set_xalign(0.0);
+            self.filetree_container.append(&file_label);
         }
     }
 }

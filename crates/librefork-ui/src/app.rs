@@ -2,17 +2,24 @@ use adw::prelude::*;
 use adw::{Application, ApplicationWindow, HeaderBar, StyleManager};
 use gtk::Orientation;
 use gtk4 as gtk;
+use gtk4::{gdk::Display, CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION};
 use librefork_core::RepoHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::widgets::{
-    commit_details::CommitDetails,
-    commit_list::CommitList,
-    side_panel::SidePanel,
+    commit_details::CommitDetails, commit_list::CommitList, side_panel::SidePanel,
 };
 
 pub fn build_ui(app: &Application) {
+    let provider = CssProvider::new();
+    provider.load_from_data(include_str!("styles.css"));
+    gtk::style_context_add_provider_for_display(
+        &Display::default().unwrap(),
+        &provider,
+        STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+
     let window = ApplicationWindow::builder()
         .application(app)
         .title("LibreFork")
@@ -269,68 +276,68 @@ pub fn build_ui(app: &Application) {
     }
 
     {
-    let state_for_dialog = state.clone();
-    let window = window.clone();
-    let commit_list_c = commit_list.clone();
-    let details_c = details.clone();
-    let side_c_cloned = side_panel.clone(); // Clone du Rc ici
-    let branch_combo_c = branch_combo.clone();
-    let title_label_c = title_label.clone();
-    let load_more_c = load_more_button.clone();
-    let search_entry_c = search_entry.clone();
+        let state_for_dialog = state.clone();
+        let window = window.clone();
+        let commit_list_c = commit_list.clone();
+        let details_c = details.clone();
+        let side_c_cloned = side_panel.clone(); // Clone du Rc ici
+        let branch_combo_c = branch_combo.clone();
+        let title_label_c = title_label.clone();
+        let load_more_c = load_more_button.clone();
+        let search_entry_c = search_entry.clone();
 
-    // Holder pour garder le dialog vivant jusqu'à la réponse
-    let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
-        Rc::new(RefCell::new(None));
+        // Holder pour garder le dialog vivant jusqu'à la réponse
+        let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
+            Rc::new(RefCell::new(None));
 
-    open_button.connect_clicked(move |_| {
-        let dialog = gtk::FileChooserNative::builder()
-            .title("Ouvrir un dépôt Git")
-            .action(gtk::FileChooserAction::SelectFolder)
-            .transient_for(&window) // parent
-            .modal(true)
-            .build();
+        open_button.connect_clicked(move |_| {
+            let dialog = gtk::FileChooserNative::builder()
+                .title("Ouvrir un dépôt Git")
+                .action(gtk::FileChooserAction::SelectFolder)
+                .transient_for(&window) // parent
+                .modal(true)
+                .build();
 
-        // conservez une ref forte
-        *dialog_holder.borrow_mut() = Some(dialog.clone());
+            // conservez une ref forte
+            *dialog_holder.borrow_mut() = Some(dialog.clone());
 
-        dialog.connect_response({
-            let state_for_dialog_cb = state_for_dialog.clone();
-            let commit_list_c = commit_list_c.clone();
-            let details_c = details_c.clone();
-            let side_c_cloned = side_c_cloned.clone(); // Cloner ici
-            let branch_combo_c2 = branch_combo_c.clone();
-            let title_label_c2 = title_label_c.clone();
-            let load_more_c2 = load_more_c.clone();
-            let search_entry_c2 = search_entry_c.clone();
-            let holder = dialog_holder.clone();
+            dialog.connect_response({
+                let state_for_dialog_cb = state_for_dialog.clone();
+                let commit_list_c = commit_list_c.clone();
+                let details_c = details_c.clone();
+                let side_c_cloned = side_c_cloned.clone(); // Cloner ici
+                let branch_combo_c2 = branch_combo_c.clone();
+                let title_label_c2 = title_label_c.clone();
+                let load_more_c2 = load_more_c.clone();
+                let search_entry_c2 = search_entry_c.clone();
+                let holder = dialog_holder.clone();
 
-            move |dlg, resp| {
-                holder.borrow_mut().take();
+                move |dlg, resp| {
+                    holder.borrow_mut().take();
 
-                if resp == gtk::ResponseType::Accept {
-                    if let Some(file) = dlg.file() {
-                        if let Some(path) = file.path() {
-                            load_repo(
-                                path.to_string_lossy().as_ref(),
-                                &state_for_dialog_cb,
-                                &commit_list_c,
-                                &details_c,
-                                &side_c_cloned, // Utilisation du clone ici
-                                &branch_combo_c2,
-                                &title_label_c2,
-                                &load_more_c2,
-                                &search_entry_c2,
-                            );
+                    if resp == gtk::ResponseType::Accept {
+                        if let Some(file) = dlg.file() {
+                            if let Some(path) = file.path() {
+                                load_repo(
+                                    path.to_string_lossy().as_ref(),
+                                    &state_for_dialog_cb,
+                                    &commit_list_c,
+                                    &details_c,
+                                    &side_c_cloned, // Utilisation du clone ici
+                                    &branch_combo_c2,
+                                    &title_label_c2,
+                                    &load_more_c2,
+                                    &search_entry_c2,
+                                );
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
 
-        dialog.show();
-    });
-}
+            dialog.show();
+        });
+    }
 
     // Load more commits
     {

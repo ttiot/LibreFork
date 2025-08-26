@@ -1,7 +1,7 @@
 use adw::prelude::*;
 use gtk::Orientation;
 use gtk4 as gtk;
-use gtk4::pango;
+use gtk4::{cairo, pango};
 use librefork_core::CommitInfo;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -61,9 +61,20 @@ impl CommitList {
         row_box.set_margin_end(8);
 
         let top = gtk::Box::new(Orientation::Horizontal, 8);
-        let graph = gtk::Label::new(Some("●"));
-        graph.add_css_class("monospace");
-        graph.set_xalign(0.0);
+        let graph = gtk::DrawingArea::new();
+        graph.set_content_width(12);
+        graph.set_content_height(24);
+        graph.set_draw_func(|_, cr: &cairo::Context, w, h| {
+            let w = w as f64;
+            let h = h as f64;
+            cr.set_source_rgb(0.5, 0.5, 0.5);
+            cr.set_line_width(2.0);
+            cr.move_to(w / 2.0, 0.0);
+            cr.line_to(w / 2.0, h);
+            cr.stroke().ok();
+            cr.arc(w / 2.0, h / 2.0, 3.0, 0.0, std::f64::consts::PI * 2.0);
+            cr.fill().ok();
+        });
 
         let hash = gtk::Label::new(Some(&format!("{}", c.short_id)));
         hash.add_css_class("monospace");
@@ -82,14 +93,17 @@ impl CommitList {
         top.append(&hash);
         top.append(&summary);
 
-        let refs = if c.refs.is_empty() {
-            String::new()
-        } else {
-            format!(" • refs: {}", c.refs.join(", "))
-        };
+        let tag_box = gtk::Box::new(Orientation::Horizontal, 4);
+        for r in &c.refs {
+            let tag = gtk::Label::new(Some(r));
+            tag.add_css_class("tag-label");
+            tag_box.append(&tag);
+        }
+        top.append(&tag_box);
+
         let bottom = gtk::Label::new(Some(&format!(
-            "{} <{}> • {} • {} parents{}",
-            c.author, c.email, c.time, c.parents, refs
+            "{} <{}> • {} • {} parents",
+            c.author, c.email, c.time, c.parents
         )));
         bottom.add_css_class("dim-label");
         bottom.set_xalign(0.0);
@@ -141,7 +155,6 @@ impl CommitList {
                         || c.short_id.contains(&q)
                         || c.oid.contains(&q)
                 })
-
                 .cloned()
                 .collect();
             self.reload_list(&filtered);
