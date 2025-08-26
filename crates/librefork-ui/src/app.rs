@@ -72,17 +72,17 @@ pub fn build_ui(app: &Application) {
 
     // Main layout
     let paned = gtk::Paned::builder()
-        .orientation(Orientation::Horizontal)
+        .orientation(Orientation::Vertical)
         .start_child(&gtk::Label::new(None))
         .end_child(&gtk::Label::new(None))
         .wide_handle(true)
         .build();
 
-    let left_scrolled = gtk::ScrolledWindow::builder()
+    let commit_scrolled = gtk::ScrolledWindow::builder()
         .hexpand(true)
         .vexpand(true)
         .build();
-    let right = gtk::ScrolledWindow::builder()
+    let details_scrolled = gtk::ScrolledWindow::builder()
         .hexpand(true)
         .vexpand(true)
         .build();
@@ -91,20 +91,20 @@ pub fn build_ui(app: &Application) {
     let details = CommitDetails::new();
     let side_panel = SidePanel::new();
 
-    left_scrolled.set_child(Some(commit_list.widget()));
-    right.set_child(Some(details.widget()));
+    commit_scrolled.set_child(Some(commit_list.widget()));
+    details_scrolled.set_child(Some(details.widget()));
 
     let load_more_button = gtk::Button::with_label("Charger plus");
     let search_entry = gtk::SearchEntry::new();
     search_entry.set_placeholder_text(Some("Rechercher"));
-    let left_box = gtk::Box::new(Orientation::Vertical, 0);
-    left_box.append(&search_entry);
-    left_box.append(&left_scrolled);
-    left_box.append(&load_more_button);
+    let top_box = gtk::Box::new(Orientation::Vertical, 0);
+    top_box.append(&search_entry);
+    top_box.append(&commit_scrolled);
+    top_box.append(&load_more_button);
 
-    paned.set_start_child(Some(&left_box));
-    paned.set_end_child(Some(&right));
-    paned.set_position(420);
+    paned.set_start_child(Some(&top_box));
+    paned.set_end_child(Some(&details_scrolled));
+    paned.set_position(300);
 
     let outer = gtk::Paned::builder()
         .orientation(Orientation::Horizontal)
