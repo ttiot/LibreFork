@@ -12,6 +12,7 @@ authors = ["LibreFork Team"]
 git2 = "0.18"
 anyhow = "1"
 thiserror = "1"
+chrono = { version = "0.4", features = ["unstable-locales"] }
 time = { version = "0.3", features = ["formatting", "parsing"] }
 
 # Aligner sur libadwaita 0.6

@@ -1,4 +1,5 @@
 use adw::prelude::*;
+use chrono::{DateTime, Local, Locale};
 use gtk::Orientation;
 use gtk4 as gtk;
 use gtk4::{cairo, pango};
@@ -71,8 +72,10 @@ impl CommitList {
 
     fn row_from_commit(c: &CommitInfo, g: &GraphRowData) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
+        row.set_height_request(24);
         row.set_margin_top(0);
         row.set_margin_bottom(0);
+        row.add_css_class("commit-row");
 
         let row_box = gtk::Box::new(Orientation::Horizontal, 8);
         row_box.set_margin_top(0);
@@ -163,12 +166,17 @@ impl CommitList {
         hash.set_xalign(0.0);
         hash.set_valign(gtk::Align::Center);
 
-        let date_str = glib::DateTime::from_iso8601(&c.time, None)
-            .ok()
-            .and_then(|dt| dt.to_timezone(&glib::TimeZone::local()).ok())
-            .and_then(|dt| dt.format("%c").ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| c.time.clone());
+        let date_str = DateTime::parse_from_rfc3339(&c.time)
+            .map(|dt| dt.with_timezone(&Local))
+            .map(|dt| {
+                let locale = std::env::var("LC_TIME")
+                    .or_else(|_| std::env::var("LANG"))
+                    .ok()
+                    .and_then(|l| l.split('.').next().unwrap_or(&l).parse::<Locale>().ok())
+                    .unwrap_or(Locale::en_US);
+                dt.format_localized("%c", locale).to_string()
+            })
+            .unwrap_or_else(|_| c.time.clone());
         let date = gtk::Label::new(Some(&date_str));
         date.add_css_class("dim-label");
         date.set_xalign(0.0);
