@@ -22,6 +22,17 @@ struct GraphRowData {
     lane_count: usize,
 }
 
+const LANE_COLORS: [(f64, f64, f64); 8] = [
+    (0.89, 0.10, 0.11),
+    (0.22, 0.49, 0.72),
+    (0.20, 0.63, 0.17),
+    (0.60, 0.31, 0.64),
+    (1.00, 0.50, 0.00),
+    (0.65, 0.34, 0.16),
+    (0.97, 0.51, 0.75),
+    (0.13, 0.70, 0.67),
+];
+
 impl CommitList {
     pub fn new() -> Self {
         let root = gtk::Box::new(Orientation::Vertical, 0);
@@ -62,34 +73,41 @@ impl CommitList {
     fn row_from_commit(c: &CommitInfo, g: &GraphRowData) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
 
-        let row_box = gtk::Box::new(Orientation::Vertical, 4);
-        row_box.set_margin_top(8);
-        row_box.set_margin_bottom(8);
+        let row_box = gtk::Box::new(Orientation::Horizontal, 8);
+        row_box.set_margin_top(4);
+        row_box.set_margin_bottom(4);
         row_box.set_margin_start(8);
         row_box.set_margin_end(8);
 
-        let top = gtk::Box::new(Orientation::Horizontal, 8);
         let graph = gtk::DrawingArea::new();
         graph.set_content_width((g.lane_count as i32) * 12);
         graph.set_content_height(24);
         let gd = g.clone();
+        let colors = LANE_COLORS;
         graph.set_draw_func(move |_, cr: &cairo::Context, _w, h| {
             let h = h as f64;
             let lane_width = 12.0;
             let center = |lane: usize| lane_width / 2.0 + lane as f64 * lane_width;
-            cr.set_source_rgb(0.5, 0.5, 0.5);
             cr.set_line_width(2.0);
 
             for (lane, oid_opt) in gd.active_before.iter().enumerate() {
                 if oid_opt.is_some() {
+                    let (r, g, b) = colors[lane % colors.len()];
+                    cr.set_source_rgb(r, g, b);
                     let x = center(lane);
                     cr.move_to(x, 0.0);
-                    cr.line_to(x, h);
+                    if lane == gd.node_lane {
+                        cr.line_to(x, h / 2.0);
+                    } else {
+                        cr.line_to(x, h);
+                    }
                     cr.stroke().ok();
                 }
             }
 
             for &p_lane in &gd.parent_lanes {
+                let (r, g, b) = colors[p_lane % colors.len()];
+                cr.set_source_rgb(r, g, b);
                 let x0 = center(gd.node_lane);
                 let y0 = h / 2.0;
                 let x1 = center(p_lane);
@@ -103,48 +121,56 @@ impl CommitList {
                 cr.stroke().ok();
             }
 
+            let (r, g, b) = colors[gd.node_lane % colors.len()];
+            cr.set_source_rgb(r, g, b);
             let x = center(gd.node_lane);
             cr.arc(x, h / 2.0, 3.0, 0.0, std::f64::consts::PI * 2.0);
             cr.fill().ok();
         });
 
-        let hash = gtk::Label::new(Some(&format!("{}", c.short_id)));
-        hash.add_css_class("monospace");
-        hash.set_xalign(0.0);
-
+        let message_box = gtk::Box::new(Orientation::Horizontal, 4);
+        message_box.set_hexpand(true);
         let summary = gtk::Label::new(Some(&c.summary));
         summary.set_xalign(0.0);
         summary.set_ellipsize(pango::EllipsizeMode::End);
         summary.set_hexpand(true);
+        summary.set_valign(gtk::Align::Center);
         let lowered = c.summary.to_lowercase();
         if lowered.contains("crash") {
             summary.add_css_class("commit-warning");
         }
-
-        top.append(&graph);
-        top.append(&hash);
-        top.append(&summary);
+        message_box.append(&summary);
 
         let tag_box = gtk::Box::new(Orientation::Horizontal, 4);
+        tag_box.set_valign(gtk::Align::Center);
         for r in &c.refs {
             let tag = gtk::Label::new(Some(r));
             tag.add_css_class("tag-label");
             tag_box.append(&tag);
         }
-        top.append(&tag_box);
+        message_box.append(&tag_box);
 
-        let bottom = gtk::Label::new(Some(&format!(
-            "{} <{}> • {} • {} parents",
-            c.author,
-            c.email,
-            c.time,
-            c.parents.len()
-        )));
-        bottom.add_css_class("dim-label");
-        bottom.set_xalign(0.0);
+        let author = gtk::Label::new(Some(&c.author));
+        author.add_css_class("dim-label");
+        author.set_xalign(0.0);
+        author.set_valign(gtk::Align::Center);
 
-        row_box.append(&top);
-        row_box.append(&bottom);
+        let hash = gtk::Label::new(Some(&c.short_id));
+        hash.add_css_class("monospace");
+        hash.add_css_class("dim-label");
+        hash.set_xalign(0.0);
+        hash.set_valign(gtk::Align::Center);
+
+        let date = gtk::Label::new(Some(&c.time));
+        date.add_css_class("dim-label");
+        date.set_xalign(0.0);
+        date.set_valign(gtk::Align::Center);
+
+        row_box.append(&graph);
+        row_box.append(&message_box);
+        row_box.append(&author);
+        row_box.append(&hash);
+        row_box.append(&date);
 
         row.set_child(Some(&row_box));
         row.set_widget_name(&c.oid);
