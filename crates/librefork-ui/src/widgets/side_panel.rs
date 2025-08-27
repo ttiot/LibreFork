@@ -72,11 +72,11 @@ impl SidePanel {
         let starred_c = starred.clone();
         click.connect_pressed(move |g, _, x, y| {
             if g.current_button() == 3 {
-                if let Some((path, _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
+                if let Some((Some(path), _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
                     if let Some(iter) = store_c.iter(&path) {
                         if store_c.iter_parent(&iter).is_some() {
                             if let Ok(name) = store_c
-                                .value(&iter, 1)
+                                .get_value(&iter, 1)
                                 .get::<String>()
                             {
                                 let mut st = starred_c.borrow_mut();
@@ -93,7 +93,7 @@ impl SidePanel {
                 }
             }
         });
-        tree.add_controller(&click);
+        tree.add_controller(click);
 
         panel
     }
@@ -104,8 +104,10 @@ impl SidePanel {
 
     fn reload(&self) {
         self.store.clear();
-        let branches_root = self.store.append(None, &["", "Branches"]);
-        let remotes_root = self.store.append(None, &["", "Remotes"]);
+        let branches_root = self.store.append(None);
+        self.store.set(&branches_root, &[(0, &""), (1, &"Branches")]);
+        let remotes_root = self.store.append(None);
+        self.store.set(&remotes_root, &[(0, &""), (1, &"Remotes")]);
         let q = self.search.text().to_string().to_lowercase();
         let stars = self.starred.borrow();
         for b in self
@@ -116,10 +118,12 @@ impl SidePanel {
         {
             let star = if stars.contains(&b.name) { "★" } else { "☆" };
             let label = format!("{} (+{}, -{})", b.name, b.ahead, b.behind);
-            self.store.append(Some(&branches_root), &[star, &label]);
+            let iter = self.store.append(Some(&branches_root));
+            self.store.set(&iter, &[(0, &star), (1, &label)]);
         }
         for r in self.remotes.borrow().iter() {
-            self.store.append(Some(&remotes_root), &["", r]);
+            let iter = self.store.append(Some(&remotes_root));
+            self.store.set(&iter, &[(0, &""), (1, r)]);
         }
     }
 

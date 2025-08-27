@@ -221,7 +221,7 @@ impl CommitList {
                 }
             }
         });
-        row.add_controller(&click);
+        row.add_controller(click);
 
         row
     }
