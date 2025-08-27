@@ -20,6 +20,7 @@ pub struct SidePanel {
     stashes: Rc<RefCell<Vec<String>>>,
     submodules: Rc<RefCell<Vec<String>>>,
     starred: Rc<RefCell<HashSet<StarredItem>>>,
+    on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 }
 
 impl SidePanel {
@@ -69,6 +70,8 @@ impl SidePanel {
         let stashes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let submodules: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
+        let on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+
         let panel = Self {
             root,
             search: search.clone(),
@@ -80,6 +83,7 @@ impl SidePanel {
             stashes: stashes.clone(),
             submodules: submodules.clone(),
             starred: starred.clone(),
+            on_star_changed: on_star_changed.clone(),
         };
 
         search.connect_search_changed({
@@ -94,7 +98,7 @@ impl SidePanel {
         let tree_c = tree.clone();
         let store_c = store.clone();
         let starred_c = starred.clone();
-        let panel_c = panel.clone();
+        let on_star_c = on_star_changed.clone();
         click.connect_pressed(move |_, _, x, y| {
             if let Some((Some(path), _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
                 if let Some(iter) = store_c.iter(&path) {
@@ -118,13 +122,10 @@ impl SidePanel {
                             let bx = gtk::Box::new(Orientation::Vertical, 0);
                             let starred_c2 = starred_c.clone();
                             let pop_c = pop.clone();
-                            let panel_c2 = panel_c.clone();
+                            let on_star_c2 = on_star_c.clone();
                             let btn = gtk::Button::with_label(label);
                             btn.connect_clicked(move |_| {
                                 {
-                                    // Ensure the mutable borrow of `starred_c2` is dropped before
-                                    // reloading the panel, otherwise `reload` would attempt to
-                                    // borrow the same `RefCell` again and panic.
                                     let mut st = starred_c2.borrow_mut();
                                     if already {
                                         st.remove(&item);
@@ -132,7 +133,9 @@ impl SidePanel {
                                         st.insert(item.clone());
                                     }
                                 }
-                                panel_c2.reload();
+                                if let Some(cb) = &*on_star_c2.borrow() {
+                                    cb();
+                                }
                                 pop_c.popdown();
                             });
                             bx.append(&btn);
@@ -150,6 +153,10 @@ impl SidePanel {
         tree.add_controller(click);
 
         panel
+    }
+
+    pub fn on_star_changed(&self, cb: impl Fn() + 'static) {
+        *self.on_star_changed.borrow_mut() = Some(Box::new(cb));
     }
 
     pub fn widget(&self) -> &gtk::Widget {
