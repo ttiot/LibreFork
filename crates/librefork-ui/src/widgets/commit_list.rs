@@ -5,6 +5,7 @@ use gtk4 as gtk;
 use gtk4::{cairo, pango};
 use librefork_core::CommitInfo;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -13,6 +14,7 @@ pub struct CommitList {
     list: gtk::ListBox,
     commits: Rc<RefCell<Vec<CommitInfo>>>,
     on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>>,
+    starred: Rc<RefCell<HashSet<String>>>,
 }
 
 #[derive(Clone)]
@@ -47,6 +49,7 @@ impl CommitList {
 
         let on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>> = Rc::new(RefCell::new(None));
         let commits: Rc<RefCell<Vec<CommitInfo>>> = Rc::new(RefCell::new(Vec::new()));
+        let starred: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
 
         let cb = on_select.clone();
         list.connect_row_selected(move |_, row| {
@@ -63,6 +66,7 @@ impl CommitList {
             list,
             commits,
             on_select,
+            starred,
         }
     }
 
@@ -70,7 +74,11 @@ impl CommitList {
         self.root.upcast_ref()
     }
 
-    fn row_from_commit(c: &CommitInfo, g: &GraphRowData) -> gtk::ListBoxRow {
+    fn row_from_commit(
+        c: &CommitInfo,
+        g: &GraphRowData,
+        starred: Rc<RefCell<HashSet<String>>>,
+    ) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_height_request(24);
         row.set_margin_top(0);
@@ -82,6 +90,12 @@ impl CommitList {
         row_box.set_margin_bottom(0);
         row_box.set_margin_start(8);
         row_box.set_margin_end(8);
+
+        let star_label = gtk::Label::new(Some("☆"));
+        star_label.set_width_chars(1);
+        if starred.borrow().contains(&c.oid) {
+            star_label.set_text("★");
+        }
 
         let graph = gtk::DrawingArea::new();
         graph.set_content_width((g.lane_count as i32) * 12);
@@ -182,6 +196,7 @@ impl CommitList {
         date.set_xalign(0.0);
         date.set_valign(gtk::Align::Center);
 
+        row_box.append(&star_label);
         row_box.append(&graph);
         row_box.append(&message_box);
         row_box.append(&author);
@@ -190,6 +205,23 @@ impl CommitList {
 
         row.set_child(Some(&row_box));
         row.set_widget_name(&c.oid);
+
+        let oid = c.oid.clone();
+        let star_label_c = star_label.clone();
+        let click = gtk::GestureClick::new();
+        click.connect_pressed(move |g, _, _, _| {
+            if g.current_button() == 3 {
+                let mut st = starred.borrow_mut();
+                if st.contains(&oid) {
+                    st.remove(&oid);
+                    star_label_c.set_text("☆");
+                } else {
+                    st.insert(oid.clone());
+                    star_label_c.set_text("★");
+                }
+            }
+        });
+        row.add_controller(&click);
 
         row
     }
@@ -242,7 +274,7 @@ impl CommitList {
         }
         let graphs = Self::compute_graph(commits);
         for (c, g) in commits.iter().zip(graphs.iter()) {
-            let row = Self::row_from_commit(c, g);
+            let row = Self::row_from_commit(c, g, self.starred.clone());
             self.list.append(&row);
         }
     }
