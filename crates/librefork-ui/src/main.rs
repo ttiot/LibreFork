@@ -1,5 +1,6 @@
 mod app;
 mod widgets;
+mod starred;
 
 use adw::prelude::*;
 use adw::Application;

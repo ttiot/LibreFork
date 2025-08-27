@@ -1,10 +1,12 @@
-use adw::prelude::*;
+use gtk::prelude::*;
 use gtk::Orientation;
 use gtk4 as gtk;
 use librefork_core::BranchStatus;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
+use crate::starred::StarredItem;
+use gtk::gdk;
 
 #[derive(Clone)]
 pub struct SidePanel {
@@ -14,11 +16,14 @@ pub struct SidePanel {
     store: gtk::TreeStore,
     branches: Rc<RefCell<Vec<BranchStatus>>>,
     remotes: Rc<RefCell<Vec<String>>>,
-    starred: Rc<RefCell<HashSet<String>>>,
+    tags: Rc<RefCell<Vec<String>>>,
+    stashes: Rc<RefCell<Vec<String>>>,
+    submodules: Rc<RefCell<Vec<String>>>,
+    starred: Rc<RefCell<HashSet<StarredItem>>>,
 }
 
 impl SidePanel {
-    pub fn new() -> Self {
+    pub fn new(starred: Rc<RefCell<HashSet<StarredItem>>>) -> Self {
         let root = gtk::Box::new(Orientation::Vertical, 4);
         root.set_hexpand(false);
         root.set_vexpand(true);
@@ -27,7 +32,11 @@ impl SidePanel {
         search.set_placeholder_text(Some("Rechercher une branche"));
         root.append(&search);
 
-        let store = gtk::TreeStore::new(&[String::static_type(), String::static_type()]);
+        let store = gtk::TreeStore::new(&[
+            String::static_type(),
+            String::static_type(),
+            String::static_type(),
+        ]);
         let tree = gtk::TreeView::with_model(&store);
         tree.set_headers_visible(false);
 
@@ -47,7 +56,9 @@ impl SidePanel {
 
         let branches: Rc<RefCell<Vec<BranchStatus>>> = Rc::new(RefCell::new(Vec::new()));
         let remotes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-        let starred: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+        let tags: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let stashes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let submodules: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
         let panel = Self {
             root,
@@ -56,6 +67,9 @@ impl SidePanel {
             store: store.clone(),
             branches: branches.clone(),
             remotes: remotes.clone(),
+            tags: tags.clone(),
+            stashes: stashes.clone(),
+            submodules: submodules.clone(),
             starred: starred.clone(),
         };
 
@@ -70,23 +84,53 @@ impl SidePanel {
         let tree_c = tree.clone();
         let store_c = store.clone();
         let starred_c = starred.clone();
+        let panel_c = panel.clone();
         click.connect_pressed(move |g, _, x, y| {
             if g.current_button() == 3 {
                 if let Some((Some(path), _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
                     if let Some(iter) = store_c.iter(&path) {
                         if store_c.iter_parent(&iter).is_some() {
-                            if let Ok(name) = store_c
-                                .get_value(&iter, 1)
-                                .get::<String>()
-                            {
-                                let mut st = starred_c.borrow_mut();
-                                if st.contains(&name) {
-                                    st.remove(&name);
-                                    store_c.set(&iter, &[(0u32, &"☆"), (1u32, &name)]);
+                            if let (Ok(name), Ok(kind)) = (
+                                store_c.get_value(&iter, 1).get::<String>(),
+                                store_c.get_value(&iter, 2).get::<String>(),
+                            ) {
+                                let item = match kind.as_str() {
+                                    "branch" => StarredItem::Branch(name.clone()),
+                                    "commit" => StarredItem::Commit(name.clone()),
+                                    _ => return,
+                                };
+                                let already = starred_c.borrow().contains(&item);
+                                let label = if already {
+                                    "Retirer des favoris"
                                 } else {
-                                    st.insert(name.clone());
-                                    store_c.set(&iter, &[(0u32, &"★"), (1u32, &name)]);
-                                }
+                                    "Ajouter aux favoris"
+                                };
+                                let pop = gtk::Popover::new();
+                                let bx = gtk::Box::new(Orientation::Vertical, 0);
+                                let starred_c2 = starred_c.clone();
+                                let pop_c = pop.clone();
+                                let panel_c2 = panel_c.clone();
+                                let btn = gtk::Button::with_label(label);
+                                btn.connect_clicked(move |_| {
+                                    let mut st = starred_c2.borrow_mut();
+                                    if already {
+                                        st.remove(&item);
+                                    } else {
+                                        st.insert(item.clone());
+                                    }
+                                    panel_c2.reload();
+                                    pop_c.popdown();
+                                });
+                                bx.append(&btn);
+                                pop.set_child(Some(&bx));
+                                pop.set_pointing_to(Some(&gdk::Rectangle::new(
+                                    x as i32,
+                                    y as i32,
+                                    1,
+                                    1,
+                                )));
+                                pop.set_parent(&tree_c);
+                                pop.popup();
                             }
                         }
                     }
@@ -102,28 +146,82 @@ impl SidePanel {
         self.root.upcast_ref()
     }
 
-    fn reload(&self) {
+    pub fn reload(&self) {
         self.store.clear();
+        let starred_root = self.store.append(None);
+        self.store
+            .set(&starred_root, &[(0, &""), (1, &"Starred"), (2, &"root")]);
         let branches_root = self.store.append(None);
-        self.store.set(&branches_root, &[(0, &""), (1, &"Branches")]);
+        self.store
+            .set(&branches_root, &[(0, &""), (1, &"Branches"), (2, &"root")]);
         let remotes_root = self.store.append(None);
-        self.store.set(&remotes_root, &[(0, &""), (1, &"Remotes")]);
+        self.store
+            .set(&remotes_root, &[(0, &""), (1, &"Remotes"), (2, &"root")]);
+        let tags_root = self.store.append(None);
+        self.store
+            .set(&tags_root, &[(0, &""), (1, &"Tags"), (2, &"root")]);
+        let stashes_root = self.store.append(None);
+        self.store
+            .set(&stashes_root, &[(0, &""), (1, &"Stashes"), (2, &"root")]);
+        let submodules_root = self.store.append(None);
+        self.store
+            .set(&submodules_root, &[(0, &""), (1, &"Submodules"), (2, &"root")]);
+
         let q = self.search.text().to_string().to_lowercase();
         let stars = self.starred.borrow();
+        for item in stars.iter() {
+            match item {
+                StarredItem::Branch(name) => {
+                    if name.to_lowercase().contains(&q) {
+                        let iter = self.store.append(Some(&starred_root));
+                        self.store
+                            .set(&iter, &[(0, &"★"), (1, name), (2, &"branch")]);
+                    }
+                }
+                StarredItem::Commit(oid) => {
+                    let short = oid.chars().take(7).collect::<String>();
+                    if short.to_lowercase().contains(&q) {
+                        let iter = self.store.append(Some(&starred_root));
+                        self.store.set(&iter, &[(0, &"★"), (1, &short), (2, &"commit")]);
+                    }
+                }
+            }
+        }
+
         for b in self
             .branches
             .borrow()
             .iter()
             .filter(|b| b.name.to_lowercase().contains(&q))
         {
-            let star = if stars.contains(&b.name) { "★" } else { "☆" };
+            let star = if stars.contains(&StarredItem::Branch(b.name.clone())) {
+                "★"
+            } else {
+                "☆"
+            };
             let label = format!("{} (+{}, -{})", b.name, b.ahead, b.behind);
             let iter = self.store.append(Some(&branches_root));
-            self.store.set(&iter, &[(0, &star), (1, &label)]);
+            self.store.set(&iter, &[(0, &star), (1, &label), (2, &"branch")]);
         }
         for r in self.remotes.borrow().iter() {
             let iter = self.store.append(Some(&remotes_root));
-            self.store.set(&iter, &[(0, &""), (1, r)]);
+            self.store
+                .set(&iter, &[(0, &""), (1, r), (2, &"remote")]);
+        }
+        for t in self.tags.borrow().iter() {
+            let iter = self.store.append(Some(&tags_root));
+            self.store
+                .set(&iter, &[(0, &""), (1, t), (2, &"tag")]);
+        }
+        for s in self.stashes.borrow().iter() {
+            let iter = self.store.append(Some(&stashes_root));
+            self.store
+                .set(&iter, &[(0, &""), (1, s), (2, &"stash")]);
+        }
+        for m in self.submodules.borrow().iter() {
+            let iter = self.store.append(Some(&submodules_root));
+            self.store
+                .set(&iter, &[(0, &""), (1, m), (2, &"submodule")]);
         }
     }
 
@@ -139,6 +237,30 @@ impl SidePanel {
         let mut v = self.remotes.borrow_mut();
         v.clear();
         v.extend_from_slice(remotes);
+        drop(v);
+        self.reload();
+    }
+
+    pub fn load_tags(&self, tags: &[String]) {
+        let mut v = self.tags.borrow_mut();
+        v.clear();
+        v.extend_from_slice(tags);
+        drop(v);
+        self.reload();
+    }
+
+    pub fn load_stashes(&self, stashes: &[String]) {
+        let mut v = self.stashes.borrow_mut();
+        v.clear();
+        v.extend_from_slice(stashes);
+        drop(v);
+        self.reload();
+    }
+
+    pub fn load_submodules(&self, subs: &[String]) {
+        let mut v = self.submodules.borrow_mut();
+        v.clear();
+        v.extend_from_slice(subs);
         drop(v);
         self.reload();
     }
