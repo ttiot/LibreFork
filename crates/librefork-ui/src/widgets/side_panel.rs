@@ -41,6 +41,14 @@ impl SidePanel {
         tree.set_headers_visible(false);
         tree.set_margin_start(4);
 
+        let tree_scrolled = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .child(&tree)
+            .build();
+        tree_scrolled.set_hexpand(true);
+        tree_scrolled.set_vexpand(true);
+
         let star_col = gtk::TreeViewColumn::new();
         let star_cell = gtk::CellRendererText::new();
         star_col.pack_start(&star_cell, false);
@@ -53,7 +61,7 @@ impl SidePanel {
         name_col.add_attribute(&name_cell, "text", 1);
         tree.append_column(&name_col);
 
-        root.append(&tree);
+        root.append(&tree_scrolled);
 
         let branches: Rc<RefCell<Vec<BranchStatus>>> = Rc::new(RefCell::new(Vec::new()));
         let remotes: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
@@ -149,6 +157,9 @@ impl SidePanel {
     }
 
     pub fn reload(&self) {
+        if let Some(adj) = self.tree.hadjustment() {
+            adj.set_value(0.0);
+        }
         self.store.clear();
         let starred_root = self.store.append(None);
         self.store
