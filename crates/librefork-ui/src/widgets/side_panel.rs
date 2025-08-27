@@ -1,3 +1,5 @@
+use crate::starred::StarredItem;
+use gtk::gdk;
 use gtk::prelude::*;
 use gtk::Orientation;
 use gtk4 as gtk;
@@ -5,8 +7,6 @@ use librefork_core::BranchStatus;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use crate::starred::StarredItem;
-use gtk::gdk;
 
 #[derive(Clone)]
 pub struct SidePanel {
@@ -39,6 +39,7 @@ impl SidePanel {
         ]);
         let tree = gtk::TreeView::with_model(&store);
         tree.set_headers_visible(false);
+        tree.set_margin_start(4);
 
         let star_col = gtk::TreeViewColumn::new();
         let star_cell = gtk::CellRendererText::new();
@@ -81,57 +82,53 @@ impl SidePanel {
         });
 
         let click = gtk::GestureClick::new();
+        click.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
         let tree_c = tree.clone();
         let store_c = store.clone();
         let starred_c = starred.clone();
         let panel_c = panel.clone();
-        click.connect_pressed(move |g, _, x, y| {
-            if g.current_button() == 3 {
-                if let Some((Some(path), _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
-                    if let Some(iter) = store_c.iter(&path) {
-                        if store_c.iter_parent(&iter).is_some() {
-                            if let (Ok(name), Ok(kind)) = (
-                                store_c.get_value(&iter, 1).get::<String>(),
-                                store_c.get_value(&iter, 2).get::<String>(),
-                            ) {
-                                let item = match kind.as_str() {
-                                    "branch" => StarredItem::Branch(name.clone()),
-                                    "commit" => StarredItem::Commit(name.clone()),
-                                    _ => return,
-                                };
-                                let already = starred_c.borrow().contains(&item);
-                                let label = if already {
-                                    "Retirer des favoris"
+        click.connect_pressed(move |_, _, x, y| {
+            if let Some((Some(path), _col, _x, _y)) = tree_c.path_at_pos(x as i32, y as i32) {
+                if let Some(iter) = store_c.iter(&path) {
+                    if store_c.iter_parent(&iter).is_some() {
+                        if let (Ok(name), Ok(kind)) = (
+                            store_c.get_value(&iter, 1).get::<String>(),
+                            store_c.get_value(&iter, 2).get::<String>(),
+                        ) {
+                            let item = match kind.as_str() {
+                                "branch" => StarredItem::Branch(name.clone()),
+                                "commit" => StarredItem::Commit(name.clone()),
+                                _ => return,
+                            };
+                            let already = starred_c.borrow().contains(&item);
+                            let label = if already {
+                                "Retirer des favoris"
+                            } else {
+                                "Ajouter aux favoris"
+                            };
+                            let pop = gtk::Popover::new();
+                            let bx = gtk::Box::new(Orientation::Vertical, 0);
+                            let starred_c2 = starred_c.clone();
+                            let pop_c = pop.clone();
+                            let panel_c2 = panel_c.clone();
+                            let btn = gtk::Button::with_label(label);
+                            btn.connect_clicked(move |_| {
+                                let mut st = starred_c2.borrow_mut();
+                                if already {
+                                    st.remove(&item);
                                 } else {
-                                    "Ajouter aux favoris"
-                                };
-                                let pop = gtk::Popover::new();
-                                let bx = gtk::Box::new(Orientation::Vertical, 0);
-                                let starred_c2 = starred_c.clone();
-                                let pop_c = pop.clone();
-                                let panel_c2 = panel_c.clone();
-                                let btn = gtk::Button::with_label(label);
-                                btn.connect_clicked(move |_| {
-                                    let mut st = starred_c2.borrow_mut();
-                                    if already {
-                                        st.remove(&item);
-                                    } else {
-                                        st.insert(item.clone());
-                                    }
-                                    panel_c2.reload();
-                                    pop_c.popdown();
-                                });
-                                bx.append(&btn);
-                                pop.set_child(Some(&bx));
-                                pop.set_pointing_to(Some(&gdk::Rectangle::new(
-                                    x as i32,
-                                    y as i32,
-                                    1,
-                                    1,
-                                )));
-                                pop.set_parent(&tree_c);
-                                pop.popup();
-                            }
+                                    st.insert(item.clone());
+                                }
+                                panel_c2.reload();
+                                pop_c.popdown();
+                            });
+                            bx.append(&btn);
+                            pop.set_child(Some(&bx));
+                            pop.set_pointing_to(Some(&gdk::Rectangle::new(
+                                x as i32, y as i32, 1, 1,
+                            )));
+                            pop.set_parent(&tree_c);
+                            pop.popup();
                         }
                     }
                 }
@@ -164,8 +161,10 @@ impl SidePanel {
         self.store
             .set(&stashes_root, &[(0, &""), (1, &"Stashes"), (2, &"root")]);
         let submodules_root = self.store.append(None);
-        self.store
-            .set(&submodules_root, &[(0, &""), (1, &"Submodules"), (2, &"root")]);
+        self.store.set(
+            &submodules_root,
+            &[(0, &""), (1, &"Submodules"), (2, &"root")],
+        );
 
         let q = self.search.text().to_string().to_lowercase();
         let stars = self.starred.borrow();
@@ -182,7 +181,8 @@ impl SidePanel {
                     let short = oid.chars().take(7).collect::<String>();
                     if short.to_lowercase().contains(&q) {
                         let iter = self.store.append(Some(&starred_root));
-                        self.store.set(&iter, &[(0, &"★"), (1, &short), (2, &"commit")]);
+                        self.store
+                            .set(&iter, &[(0, &"★"), (1, &short), (2, &"commit")]);
                     }
                 }
             }
@@ -201,22 +201,20 @@ impl SidePanel {
             };
             let label = format!("{} (+{}, -{})", b.name, b.ahead, b.behind);
             let iter = self.store.append(Some(&branches_root));
-            self.store.set(&iter, &[(0, &star), (1, &label), (2, &"branch")]);
+            self.store
+                .set(&iter, &[(0, &star), (1, &label), (2, &"branch")]);
         }
         for r in self.remotes.borrow().iter() {
             let iter = self.store.append(Some(&remotes_root));
-            self.store
-                .set(&iter, &[(0, &""), (1, r), (2, &"remote")]);
+            self.store.set(&iter, &[(0, &""), (1, r), (2, &"remote")]);
         }
         for t in self.tags.borrow().iter() {
             let iter = self.store.append(Some(&tags_root));
-            self.store
-                .set(&iter, &[(0, &""), (1, t), (2, &"tag")]);
+            self.store.set(&iter, &[(0, &""), (1, t), (2, &"tag")]);
         }
         for s in self.stashes.borrow().iter() {
             let iter = self.store.append(Some(&stashes_root));
-            self.store
-                .set(&iter, &[(0, &""), (1, s), (2, &"stash")]);
+            self.store.set(&iter, &[(0, &""), (1, s), (2, &"stash")]);
         }
         for m in self.submodules.borrow().iter() {
             let iter = self.store.append(Some(&submodules_root));
@@ -265,4 +263,3 @@ impl SidePanel {
         self.reload();
     }
 }
-
