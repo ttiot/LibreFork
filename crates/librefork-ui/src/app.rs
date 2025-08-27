@@ -7,10 +7,10 @@ use librefork_core::RepoHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::starred::{StarDb, StarredItem};
 use crate::widgets::{
     commit_details::CommitDetails, commit_list::CommitList, side_panel::SidePanel,
 };
-use crate::starred::StarredItem;
 use std::collections::HashSet;
 
 pub fn build_ui(app: &Application) {
@@ -89,16 +89,12 @@ pub fn build_ui(app: &Application) {
         .vexpand(true)
         .build();
 
+    let star_db = Rc::new(StarDb::new().expect("failed to init star db"));
     let starred: Rc<RefCell<HashSet<StarredItem>>> = Rc::new(RefCell::new(HashSet::new()));
+    let prev_stars: Rc<RefCell<HashSet<StarredItem>>> = Rc::new(RefCell::new(HashSet::new()));
     let commit_list = CommitList::new(starred.clone());
     let details = CommitDetails::new();
     let side_panel = SidePanel::new(starred.clone());
-    {
-        let side_c = side_panel.clone();
-        commit_list.on_star_changed(move || {
-            side_c.reload();
-        });
-    }
 
     commit_scrolled.set_child(Some(commit_list.widget()));
     details_scrolled.set_child(Some(details.widget()));
@@ -145,6 +141,31 @@ pub fn build_ui(app: &Application) {
     let state = Rc::new(RefCell::new(State::default()));
     const PAGE_SIZE: usize = 100;
 
+    let commit_list_c = commit_list.clone();
+    let side_c = side_panel.clone();
+    let state_c = state.clone();
+    let starred_c = starred.clone();
+    let prev_c = prev_stars.clone();
+    let star_db_c = star_db.clone();
+    let search_entry_c = search_entry.clone();
+    let star_cb = move || {
+        if let Some(repo) = state_c.borrow().repo_path.clone() {
+            let new_set = starred_c.borrow();
+            let prev_set = prev_c.borrow();
+            for item in new_set.difference(&prev_set) {
+                let _ = star_db_c.add(&repo, item);
+            }
+            for item in prev_set.difference(&new_set) {
+                let _ = star_db_c.remove(&repo, item);
+            }
+        }
+        *prev_c.borrow_mut() = starred_c.borrow().clone();
+        side_c.reload();
+        commit_list_c.filter(&search_entry_c.text());
+    };
+    commit_list.on_star_changed(star_cb.clone());
+    side_panel.on_star_changed(star_cb);
+
     fn load_repo(
         path: &str,
         state: &Rc<RefCell<State>>,
@@ -155,9 +176,19 @@ pub fn build_ui(app: &Application) {
         title_label: &gtk::Label,
         load_more: &gtk::Button,
         search_entry: &gtk::SearchEntry,
+        starred: &Rc<RefCell<HashSet<StarredItem>>>,
+        prev_stars: &Rc<RefCell<HashSet<StarredItem>>>,
+        star_db: &StarDb,
     ) {
         match RepoHandle::open(path) {
             Ok(repo) => {
+                if let Ok(stars) = star_db.load(path) {
+                    let mut st = starred.borrow_mut();
+                    st.clear();
+                    st.extend(stars);
+                    *prev_stars.borrow_mut() = st.clone();
+                }
+
                 if let Ok(head) = repo.head() {
                     if let Some(name) = head {
                         title_label.set_text(&format!("LibreFork - {}", name));
@@ -222,6 +253,9 @@ pub fn build_ui(app: &Application) {
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
         let search_entry_c = search_entry.clone();
+        let starred_c = starred.clone();
+        let prev_c = prev_stars.clone();
+        let star_db_c = star_db.clone();
         refresh_button.connect_clicked(move |_| {
             let path_opt = { state.borrow().repo_path.clone() };
             if let Some(path) = path_opt {
@@ -235,6 +269,9 @@ pub fn build_ui(app: &Application) {
                     &title_label_c,
                     &load_more_c,
                     &search_entry_c,
+                    &starred_c,
+                    &prev_c,
+                    &star_db_c,
                 );
             }
         });
@@ -303,6 +340,9 @@ pub fn build_ui(app: &Application) {
         let title_label_c = title_label.clone();
         let load_more_c = load_more_button.clone();
         let search_entry_c = search_entry.clone();
+        let starred_c = starred.clone();
+        let prev_c = prev_stars.clone();
+        let star_db_c = star_db.clone();
 
         // Holder pour garder le dialog vivant jusqu'à la réponse
         let dialog_holder: Rc<RefCell<Option<gtk::FileChooserNative>>> =
@@ -328,6 +368,9 @@ pub fn build_ui(app: &Application) {
                 let title_label_c2 = title_label_c.clone();
                 let load_more_c2 = load_more_c.clone();
                 let search_entry_c2 = search_entry_c.clone();
+                let starred_c2 = starred_c.clone();
+                let prev_c2 = prev_c.clone();
+                let star_db_c2 = star_db_c.clone();
                 let holder = dialog_holder.clone();
 
                 move |dlg, resp| {
@@ -346,6 +389,9 @@ pub fn build_ui(app: &Application) {
                                     &title_label_c2,
                                     &load_more_c2,
                                     &search_entry_c2,
+                                    &starred_c2,
+                                    &prev_c2,
+                                    &star_db_c2,
                                 );
                             }
                         }
@@ -412,6 +458,9 @@ pub fn build_ui(app: &Application) {
             &title_label,
             &load_more_button,
             &search_entry,
+            &starred,
+            &prev_stars,
+            &star_db,
         );
     }
 
