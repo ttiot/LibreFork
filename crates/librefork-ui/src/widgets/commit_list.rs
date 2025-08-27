@@ -4,6 +4,7 @@ use gtk::Orientation;
 use gtk4 as gtk;
 use gtk4::{cairo, pango};
 use librefork_core::CommitInfo;
+use crate::starred::StarredItem;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -14,7 +15,8 @@ pub struct CommitList {
     list: gtk::ListBox,
     commits: Rc<RefCell<Vec<CommitInfo>>>,
     on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>>,
-    starred: Rc<RefCell<HashSet<String>>>,
+    starred: Rc<RefCell<HashSet<StarredItem>>>,
+    on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 }
 
 #[derive(Clone)]
@@ -37,7 +39,7 @@ const LANE_COLORS: [(f64, f64, f64); 8] = [
 ];
 
 impl CommitList {
-    pub fn new() -> Self {
+    pub fn new(starred: Rc<RefCell<HashSet<StarredItem>>>) -> Self {
         let root = gtk::Box::new(Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
@@ -49,7 +51,7 @@ impl CommitList {
 
         let on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>> = Rc::new(RefCell::new(None));
         let commits: Rc<RefCell<Vec<CommitInfo>>> = Rc::new(RefCell::new(Vec::new()));
-        let starred: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
+        let on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
 
         let cb = on_select.clone();
         list.connect_row_selected(move |_, row| {
@@ -67,6 +69,7 @@ impl CommitList {
             commits,
             on_select,
             starred,
+            on_star_changed,
         }
     }
 
@@ -74,10 +77,15 @@ impl CommitList {
         self.root.upcast_ref()
     }
 
+    pub fn on_star_changed(&self, cb: impl Fn() + 'static) {
+        *self.on_star_changed.borrow_mut() = Some(Box::new(cb));
+    }
+
     fn row_from_commit(
         c: &CommitInfo,
         g: &GraphRowData,
-        starred: Rc<RefCell<HashSet<String>>>,
+        starred: Rc<RefCell<HashSet<StarredItem>>>,
+        on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
     ) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_height_request(24);
@@ -93,7 +101,10 @@ impl CommitList {
 
         let star_label = gtk::Label::new(Some("☆"));
         star_label.set_width_chars(1);
-        if starred.borrow().contains(&c.oid) {
+        if starred
+            .borrow()
+            .contains(&StarredItem::Commit(c.oid.clone()))
+        {
             star_label.set_text("★");
         }
 
@@ -209,16 +220,47 @@ impl CommitList {
         let oid = c.oid.clone();
         let star_label_c = star_label.clone();
         let click = gtk::GestureClick::new();
-        click.connect_pressed(move |g, _, _, _| {
+        let row_c = row.clone();
+        click.connect_pressed(move |g, _, x, y| {
             if g.current_button() == 3 {
-                let mut st = starred.borrow_mut();
-                if st.contains(&oid) {
-                    st.remove(&oid);
-                    star_label_c.set_text("☆");
+                let item = StarredItem::Commit(oid.clone());
+                let already = starred.borrow().contains(&item);
+                let label = if already {
+                    "Retirer des favoris"
                 } else {
-                    st.insert(oid.clone());
-                    star_label_c.set_text("★");
-                }
+                    "Ajouter aux favoris"
+                };
+                let pop = gtk::Popover::new();
+                let bx = gtk::Box::new(Orientation::Vertical, 0);
+                let starred_c = starred.clone();
+                let star_label_c2 = star_label_c.clone();
+                let pop_c = pop.clone();
+                let on_star_c = on_star_changed.clone();
+                let btn = gtk::Button::with_label(label);
+                btn.connect_clicked(move |_| {
+                    let mut st = starred_c.borrow_mut();
+                    if already {
+                        st.remove(&item);
+                        star_label_c2.set_text("☆");
+                    } else {
+                        st.insert(item.clone());
+                        star_label_c2.set_text("★");
+                    }
+                    if let Some(cb) = &*on_star_c.borrow() {
+                        cb();
+                    }
+                    pop_c.popdown();
+                });
+                bx.append(&btn);
+                pop.set_child(Some(&bx));
+                pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+                    x as i32,
+                    y as i32,
+                    1,
+                    1,
+                )));
+                pop.set_parent(&row_c);
+                pop.popup();
             }
         });
         row.add_controller(click);
@@ -274,7 +316,12 @@ impl CommitList {
         }
         let graphs = Self::compute_graph(commits);
         for (c, g) in commits.iter().zip(graphs.iter()) {
-            let row = Self::row_from_commit(c, g, self.starred.clone());
+            let row = Self::row_from_commit(
+                c,
+                g,
+                self.starred.clone(),
+                self.on_star_changed.clone(),
+            );
             self.list.append(&row);
         }
     }

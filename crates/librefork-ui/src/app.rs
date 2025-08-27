@@ -10,6 +10,8 @@ use std::rc::Rc;
 use crate::widgets::{
     commit_details::CommitDetails, commit_list::CommitList, side_panel::SidePanel,
 };
+use crate::starred::StarredItem;
+use std::collections::HashSet;
 
 pub fn build_ui(app: &Application) {
     let provider = CssProvider::new();
@@ -87,9 +89,16 @@ pub fn build_ui(app: &Application) {
         .vexpand(true)
         .build();
 
-    let commit_list = CommitList::new();
+    let starred: Rc<RefCell<HashSet<StarredItem>>> = Rc::new(RefCell::new(HashSet::new()));
+    let commit_list = CommitList::new(starred.clone());
     let details = CommitDetails::new();
-    let side_panel = SidePanel::new();
+    let side_panel = SidePanel::new(starred.clone());
+    {
+        let side_c = side_panel.clone();
+        commit_list.on_star_changed(move || {
+            side_c.reload();
+        });
+    }
 
     commit_scrolled.set_child(Some(commit_list.widget()));
     details_scrolled.set_child(Some(details.widget()));
@@ -175,6 +184,15 @@ pub fn build_ui(app: &Application) {
                 }
                 if let Ok(remotes) = repo.list_remotes() {
                     side.load_remotes(&remotes);
+                }
+                if let Ok(tags) = repo.list_tags() {
+                    side.load_tags(&tags);
+                }
+                if let Ok(stashes) = repo.list_stashes() {
+                    side.load_stashes(&stashes);
+                }
+                if let Ok(subs) = repo.list_submodules() {
+                    side.load_submodules(&subs);
                 }
 
                 let mut st = state.borrow_mut();

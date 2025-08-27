@@ -112,6 +112,42 @@ impl RepoHandle {
         Ok(remotes)
     }
 
+    pub fn list_tags(&self) -> Result<Vec<String>> {
+        let mut tags = Vec::new();
+        self.repo.tag_foreach(|_, name| {
+            if let Ok(name_str) = std::str::from_utf8(name) {
+                tags.push(name_str.to_string());
+            }
+            true
+        })?;
+        Ok(tags)
+    }
+
+    pub fn list_stashes(&self) -> Result<Vec<String>> {
+        let mut stashes = Vec::new();
+        let mut repo = Repository::open(&self.path)?;
+        repo.stash_foreach(|i, name, _oid| {
+            let label = if name.is_empty() {
+                format!("stash@{{{}}}", i)
+            } else {
+                name.to_string()
+            };
+            stashes.push(label);
+            true
+        })?;
+        Ok(stashes)
+    }
+
+    pub fn list_submodules(&self) -> Result<Vec<String>> {
+        let mut subs = Vec::new();
+        for sm in self.repo.submodules()? {
+            if let Some(name) = sm.name() {
+                subs.push(name.to_string());
+            }
+        }
+        Ok(subs)
+    }
+
     pub fn list_commits_paginated(&self, skip: usize, max: usize) -> Result<Vec<CommitInfo>> {
         let mut revwalk = self.repo.revwalk()?;
         revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
