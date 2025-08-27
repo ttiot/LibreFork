@@ -113,11 +113,16 @@ impl SidePanel {
                             let panel_c2 = panel_c.clone();
                             let btn = gtk::Button::with_label(label);
                             btn.connect_clicked(move |_| {
-                                let mut st = starred_c2.borrow_mut();
-                                if already {
-                                    st.remove(&item);
-                                } else {
-                                    st.insert(item.clone());
+                                {
+                                    // Ensure the mutable borrow of `starred_c2` is dropped before
+                                    // reloading the panel, otherwise `reload` would attempt to
+                                    // borrow the same `RefCell` again and panic.
+                                    let mut st = starred_c2.borrow_mut();
+                                    if already {
+                                        st.remove(&item);
+                                    } else {
+                                        st.insert(item.clone());
+                                    }
                                 }
                                 panel_c2.reload();
                                 pop_c.popdown();
