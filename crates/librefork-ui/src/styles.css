@@ -94,3 +94,30 @@
     text-decoration: underline;
 }
 .text-link:hover { filter: brightness(1.1); }
+
+/* Home panel */
+.home-container {
+    padding-top: 48px;
+    align-items: center;
+    justify-content: center;
+}
+.home-logo {
+    min-width: 96px;
+    min-height: 96px;
+    border-radius: 48px;
+    background: linear-gradient(135deg, rgba(53,132,228,0.9), rgba(104,92,231,0.9));
+    color: white;
+}
+.home-logo-text {
+    font-weight: 800;
+    font-size: 28px;
+    letter-spacing: 1px;
+    margin: 20px 0;
+}
+.home-title {
+    font-weight: 800;
+    font-size: 22px;
+}
+.home-subtitle {
+    opacity: 0.8;
+}

@@ -13,7 +13,10 @@ use crate::starred::{StarDb, StarredItem};
 use crate::recents::RecentDb;
 use glib::prelude::ToVariant;
 use crate::widgets::{
-    commit_details::CommitDetails, commit_list::{CommitList, CommitContextAction}, side_panel::SidePanel,
+    commit_details::CommitDetails,
+    commit_list::{CommitList, CommitContextAction},
+    side_panel::SidePanel,
+    home::HomePanel,
 };
 use std::collections::HashSet;
 
@@ -135,6 +138,7 @@ pub fn build_ui(app: &Application) {
     let commit_list = CommitList::new(starred.clone());
     let details = CommitDetails::new();
     let side_panel = SidePanel::new(starred.clone());
+    let home_panel = HomePanel::new();
 
     commit_scrolled.set_child(Some(commit_list.widget()));
     details_scrolled.set_child(Some(details.widget()));
@@ -215,6 +219,9 @@ pub fn build_ui(app: &Application) {
         repos: Vec<String>,
         // Current selected tab index (if any)
         current_idx: Option<usize>,
+        // Home tab visibility and selection
+        home_open: bool,
+        home_active: bool,
     }
     let state = Rc::new(RefCell::new(State::default()));
     const PAGE_SIZE: usize = 100;
@@ -341,7 +348,7 @@ pub fn build_ui(app: &Application) {
         }
     }
 
-    // Simple tab row with a "+" opener; visible only when >= 2 repos
+    // Simple tab row with a "+" opener; also adds a Home tab when enabled
     let tabs_row = gtk::Box::new(Orientation::Horizontal, 6);
     tabs_row.add_css_class("toolbar");
     tabs_row.add_css_class("tabbar");
@@ -350,8 +357,17 @@ pub fn build_ui(app: &Application) {
     plus_button.set_tooltip_text(Some("Ouvrir un dépôt dans un nouvel onglet"));
     // Insert tabs row after the toolbar in the vertical content box
     content.insert_child_after(&tabs_row, Some(&toolbar));
+    // Insert the Home panel just after the tabbar; we toggle visibility with tabs
+    content.insert_child_after(home_panel.widget(), Some(&tabs_row));
+    home_panel.widget().set_visible(true);
+    outer.set_visible(false);
     // Helper to rebuild tabs based on state
-    let rebuild_tabs = {
+    // Clone stable handles to avoid moving originals into closures
+    let outer_for_tabs = outer.clone();
+    let home_widget_for_tabs = home_panel.widget().clone();
+    let outer_switch = outer.clone();
+    let home_widget_switch = home_panel.widget().clone();
+    let rebuild_tabs: Rc<dyn Fn()> = {
         let tabs_row = tabs_row.clone();
         let plus_button = plus_button.clone();
         let state = state.clone();
@@ -366,14 +382,129 @@ pub fn build_ui(app: &Application) {
         let star_db_c = star_db.clone();
         let status_branch_label_c = status_branch_label.clone();
         let status_sync_button_c_global = status_sync_button.clone();
-        move || {
+        Rc::new(move || {
             // Clear row
             while let Some(child) = tabs_row.first_child() { tabs_row.remove(&child); }
 
-            let (repos, current_idx) = {
+            let (repos, current_idx, home_open, home_active) = {
                 let st = state.borrow();
-                (st.repos.clone(), st.current_idx)
+                (st.repos.clone(), st.current_idx, st.home_open, st.home_active)
             };
+
+            // Optional Home tab (can be active)
+            if home_open {
+                let home_box = gtk::Box::new(Orientation::Horizontal, 2);
+                home_box.add_css_class("tab-item");
+                let home_btn = gtk::ToggleButton::with_label("Home");
+                home_btn.add_css_class("flat");
+                home_btn.add_css_class("tab-button");
+                if home_active || repos.is_empty() && current_idx.is_none() {
+                    home_btn.set_active(true);
+                    home_btn.add_css_class("tab-active");
+                }
+                home_btn.set_tooltip_text(Some("Accueil"));
+                let home_close = gtk::Button::from_icon_name("window-close-symbolic");
+                home_close.add_css_class("flat");
+                home_close.add_css_class("tab-close");
+                home_close.set_tooltip_text(Some("Fermer l'onglet"));
+
+                // Activate Home
+                {
+                    let state_c = state.clone();
+                    let tabs_row_c = tabs_row.clone();
+                    let outer_c = outer_for_tabs.clone();
+                    let home_widget = home_widget_for_tabs.clone();
+                    let home_btn_c = home_btn.clone();
+                    home_btn.connect_clicked(move |_| {
+                        {
+                            let mut st = state_c.borrow_mut();
+                            st.home_active = true;
+                            st.current_idx = st.current_idx; // unchanged
+                        }
+                        // Update active CSS on all tabs
+                        let mut child = tabs_row_c.first_child();
+                        while let Some(c) = child {
+                            let next = c.next_sibling();
+                            if let Ok(container) = c.downcast::<gtk::Box>() {
+                                if let Some(first) = container.first_child() {
+                                    if let Ok(tb) = first.downcast::<gtk::ToggleButton>() {
+                                        tb.remove_css_class("tab-active");
+                                    }
+                                }
+                            }
+                            child = next;
+                        }
+                        home_btn_c.add_css_class("tab-active");
+                        // Toggle panels
+                        outer_c.set_visible(false);
+                        home_widget.set_visible(true);
+                    });
+                }
+
+                // Close Home tab
+                {
+                    let state_c = state.clone();
+                    let tabs_row_c = tabs_row.clone();
+                    let outer_c = outer_for_tabs.clone();
+                    let home_widget = home_widget_for_tabs.clone();
+                    let home_box_c = home_box.clone();
+                    let commit_list_c2 = commit_list_c.clone();
+                    let details_c2 = details_c.clone();
+                    let side_c2 = side_c.clone();
+                    let window_c2 = window_c.clone();
+                    let load_more_c2 = load_more_c.clone();
+                    let search_entry_c2 = search_entry_c.clone();
+                    let starred_c2 = starred_c.clone();
+                    let prev_c2 = prev_c.clone();
+                    let star_db_c2 = star_db_c.clone();
+                    let status_branch_label_c2 = status_branch_label_c.clone();
+                    let status_sync_button_c2 = status_sync_button_c_global.clone();
+                    home_close.connect_clicked(move |_| {
+                        let (switch_to_repo, selected_path) = {
+                            let mut st = state_c.borrow_mut();
+                            st.home_open = false;
+                            let switch_to_repo = st.home_active && !st.repos.is_empty();
+                            if switch_to_repo {
+                                st.home_active = false;
+                                st.current_idx = Some(0);
+                                st.repo_path = Some(st.repos[0].clone());
+                            }
+                            (switch_to_repo, st.repo_path.clone())
+                        };
+                        // Remove only the Home tab from the row
+                        tabs_row_c.remove(&home_box_c);
+                        if switch_to_repo {
+                            outer_c.set_visible(true);
+                            home_widget.set_visible(false);
+                            if let Some(path) = selected_path {
+                                load_repo(
+                                    &path,
+                                    &state_c,
+                                    &commit_list_c2,
+                                    &details_c2,
+                                    &side_c2,
+                                    &window_c2,
+                                    &load_more_c2,
+                                    &search_entry_c2,
+                                    &starred_c2,
+                                    &prev_c2,
+                                    &star_db_c2,
+                                    &status_branch_label_c2,
+                                    &status_sync_button_c2,
+                                );
+                            }
+                        } else {
+                            // No repo to show → keep split hidden
+                            outer_c.set_visible(false);
+                            home_widget.set_visible(false);
+                        }
+                    });
+                }
+
+                home_box.append(&home_btn);
+                home_box.append(&home_close);
+                tabs_row.append(&home_box);
+            }
             for (i, p) in repos.iter().enumerate() {
                 let label = std::path::Path::new(p)
                     .file_name()
@@ -385,7 +516,7 @@ pub fn build_ui(app: &Application) {
                 let b = gtk::ToggleButton::with_label(&label);
                 b.add_css_class("flat");
                 b.add_css_class("tab-button");
-                if Some(i) == current_idx {
+                if Some(i) == current_idx && !home_active {
                     b.set_active(true);
                     b.add_css_class("tab-active");
                 }
@@ -412,11 +543,14 @@ pub fn build_ui(app: &Application) {
                 {
                 let tabs_row_c = tabs_row.clone();
                 let b_c = b.clone();
+                let outer_c2 = outer_for_tabs.clone();
+                let home_widget_c2 = home_widget_for_tabs.clone();
                 b.connect_clicked(move |_| {
                     {
                         let mut st = state_c.borrow_mut();
                         st.repo_path = Some(p2.clone());
                         st.current_idx = st.repos.iter().position(|x| x == &p2);
+                        st.home_active = false;
                     }
                     // Update active tab visual state
                     let mut child = tabs_row_c.first_child();
@@ -433,6 +567,9 @@ pub fn build_ui(app: &Application) {
                     }
                     // Set active on this one
                     b_c.add_css_class("tab-active");
+                    // Ensure content switches to repo view
+                    outer_c2.set_visible(true);
+                    home_widget_c2.set_visible(false);
                     load_repo(
                         &p2,
                         &state_c,
@@ -468,6 +605,8 @@ pub fn build_ui(app: &Application) {
                     let tabs_row_c = tabs_row.clone();
                     let status_sync_button_c2 = status_sync_button_c_global.clone();
                     let tab_box_c = tab_box.clone();
+                    let toggle_home = home_widget_for_tabs.clone();
+                    let toggle_outer = outer_for_tabs.clone();
                     close_btn.connect_clicked(move |_| {
                         let (maybe_new_path, need_reload) = {
                             let mut st = state_c.borrow_mut();
@@ -479,6 +618,10 @@ pub fn build_ui(app: &Application) {
                                         if st.repos.is_empty() {
                                             st.current_idx = None;
                                             st.repo_path = None;
+                                            // If Home is open, switch to it
+                                            if st.home_open {
+                                                st.home_active = true;
+                                            }
                                             (None, true)
                                         } else {
                                             let new_idx = if idx >= st.repos.len() { st.repos.len() - 1 } else { idx };
@@ -549,6 +692,10 @@ pub fn build_ui(app: &Application) {
                                 status_sync_button_c2.set_label("🗘 0↓ 0↑");
                                 status_sync_button_c2.set_sensitive(false);
                                 status_sync_button_c2.set_tooltip_text(Some("No repository open"));
+                                // Show Home if available
+                                let st = state_c.borrow();
+                                toggle_home.set_visible(st.home_open);
+                                toggle_outer.set_visible(!st.home_open);
                             }
                         }
                     });
@@ -561,7 +708,7 @@ pub fn build_ui(app: &Application) {
             // Always show the plus button and the tabbar
             tabs_row.append(&plus_button);
             tabs_row.set_visible(true);
-        }
+        })
     };
 
     // Helper to refresh the Recents submenu from the DB
@@ -908,6 +1055,8 @@ pub fn build_ui(app: &Application) {
         let refresh_recents_menu_for_open = refresh_recents_menu.clone();
         let run_repo_op_for_open = run_repo_op.clone();
         let rebuild_tabs_for_open = rebuild_tabs.clone();
+        let outer_c_for_open = outer_switch.clone();
+        let home_widget_for_open = home_widget_switch.clone();
         let open_repo_handler_with_policy: Rc<dyn Fn(bool)> = Rc::new(move |force_add: bool| {
             let dialog = gtk::FileChooserNative::builder()
                 .title("Ouvrir un dépôt Git")
@@ -939,6 +1088,8 @@ pub fn build_ui(app: &Application) {
                 let status_lbl_c2 = status_lbl_capture.clone();
                 let status_sync_btn_c2 = status_sync_btn_capture.clone();
                 let rebuild_tabs_c = rebuild_tabs_for_open.clone();
+                let outer_switch_c = outer_c_for_open.clone();
+                let home_switch_c = home_widget_for_open.clone();
 
                 move |dlg, resp| {
                     holder.borrow_mut().take();
@@ -955,8 +1106,11 @@ pub fn build_ui(app: &Application) {
                                             st.repos.push(chosen.clone());
                                         }
                                         st.current_idx = st.repos.iter().position(|p| p == &chosen);
+                                        st.home_active = false;
                                     }
                                     rebuild_tabs_c();
+                outer_switch_c.set_visible(true);
+                home_switch_c.set_visible(false);
                 load_repo(
                     &chosen,
                     &state_for_dialog_cb,
@@ -999,6 +1153,8 @@ pub fn build_ui(app: &Application) {
                                     let refresh_recents_menu_c3 = refresh_recents_menu_for_open_c.clone();
                                     let run_repo_op_c3 = run_repo_op_for_open_c.clone();
                                     let chosen_c = chosen.clone();
+                                    let outer_switch_c2 = outer_switch_c.clone();
+                                    let home_switch_c2 = home_switch_c.clone();
                                     dlg.connect_response(None, move |d: &adw::MessageDialog, resp: &str| {
                                         d.hide();
         
@@ -1008,6 +1164,7 @@ pub fn build_ui(app: &Application) {
                                                 st.repos.clear();
                                                 st.repos.push(chosen_c.clone());
                                                 st.current_idx = Some(0);
+                                                st.home_active = false;
                                             }
                                         } else {
                                             let mut st = state_c3.borrow_mut();
@@ -1015,8 +1172,11 @@ pub fn build_ui(app: &Application) {
                                                 st.repos.push(chosen_c.clone());
                                             }
                                             st.current_idx = st.repos.iter().position(|p| p == &chosen_c);
+                                            st.home_active = false;
                                         }
                                         rebuild_tabs_c3();
+                                        outer_switch_c2.set_visible(true);
+                                        home_switch_c2.set_visible(false);
                                         load_repo(
                                             &chosen_c,
                                             &state_c3,
@@ -1046,8 +1206,11 @@ pub fn build_ui(app: &Application) {
                                             st.repos.push(chosen.clone());
                                         }
                                         st.current_idx = st.repos.iter().position(|p| p == &chosen);
+                                        st.home_active = false;
                                     }
                         rebuild_tabs_c();
+                        outer_switch_c.set_visible(true);
+                        home_switch_c.set_visible(false);
                         load_repo(
                             &chosen,
                             &state_for_dialog_cb,
@@ -1111,6 +1274,8 @@ pub fn build_ui(app: &Application) {
         let refresh_recents_menu_rc = refresh_recents_menu.clone();
         let run_repo_op_rc = run_repo_op.clone();
         let rebuild_tabs_rc = rebuild_tabs.clone();
+        let outer_c_recent = outer_switch.clone();
+        let home_widget_recent = home_widget_switch.clone();
         act_open_recent.connect_activate(move |_, param| {
             if let Some(v) = param {
                 if let Some(s) = v.str() {
@@ -1141,6 +1306,8 @@ pub fn build_ui(app: &Application) {
                         let run_repo_op_c3 = run_repo_op_rc.clone();
                         let rebuild_tabs_c3 = rebuild_tabs_rc.clone();
                         let status_sync_button_rc2 = status_sync_button_rc.clone();
+                        let outer_c_recent2 = outer_c_recent.clone();
+                        let home_widget_recent2 = home_widget_recent.clone();
                         dlg.connect_response(None, move |d: &adw::MessageDialog, resp: &str| {
                             d.hide();
                             if resp == "replace" {
@@ -1149,6 +1316,7 @@ pub fn build_ui(app: &Application) {
                                     st.repos.clear();
                                     st.repos.push(p.clone());
                                     st.current_idx = Some(0);
+                                    st.home_active = false;
                                 }
                             } else {
                                 let mut st = state_c3.borrow_mut();
@@ -1156,8 +1324,11 @@ pub fn build_ui(app: &Application) {
                                     st.repos.push(p.clone());
                                 }
                                 st.current_idx = st.repos.iter().position(|x| x == &p);
+                                st.home_active = false;
                             }
                             rebuild_tabs_c3();
+                            outer_c_recent2.set_visible(true);
+                            home_widget_recent2.set_visible(false);
                             load_repo(
                                 &p,
                                 &state_c3,
@@ -1185,8 +1356,11 @@ pub fn build_ui(app: &Application) {
                                 st.repos.push(p.clone());
                             }
                             st.current_idx = st.repos.iter().position(|x| x == &p);
+                            st.home_active = false;
                         }
                         rebuild_tabs_rc();
+                        outer_c_recent.set_visible(true);
+                        home_widget_recent.set_visible(false);
                         load_repo(
                             &p,
                             &state_for_recent,
@@ -1562,11 +1736,20 @@ pub fn build_ui(app: &Application) {
     }
 
     // Build initial tabbar (placeholder if needed) and populate Recents submenu
+    {
+        let mut st = state.borrow_mut();
+        st.home_open = true;
+        st.home_active = true;
+    }
     (rebuild_tabs)();
     refresh_recents_menu();
 
     // Démarrage: tenter d'ouvrir --repo PATH si passé en argument
     if let Some(path) = std::env::args().skip_while(|a| a != "--repo").nth(1) {
+        {
+            let mut st = state.borrow_mut();
+            st.home_active = false;
+        }
         load_repo(
             &path,
             &state,
@@ -1584,6 +1767,8 @@ pub fn build_ui(app: &Application) {
         );
         // Assure l'affichage de l'onglet dès le premier dépôt
         (rebuild_tabs)();
+        outer_switch.set_visible(true);
+        home_widget_switch.set_visible(false);
         let _ = recent_db.touch(&path);
         refresh_recents_menu();
         let run_repo_op_c = run_repo_op.clone();
