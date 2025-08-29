@@ -65,7 +65,6 @@
     min-width: 48px;
     min-height: 48px;
     border-radius: 6px;
-    overflow: hidden;
 }
 .avatar-initials {
     min-width: 48px;
@@ -98,8 +97,6 @@
 /* Home panel */
 .home-container {
     padding-top: 48px;
-    align-items: center;
-    justify-content: center;
 }
 .home-logo {
     min-width: 96px;

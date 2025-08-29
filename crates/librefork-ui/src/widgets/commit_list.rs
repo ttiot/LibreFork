@@ -116,7 +116,7 @@ impl CommitList {
                     bx.set_margin_top(4);
                     bx.set_margin_bottom(4);
 
-                    let mut add_btn = |label: &str, action: CommitContextAction| {
+                    let add_btn = |label: &str, action: CommitContextAction| {
                         let btn = gtk::Button::new();
                         btn.add_css_class("flat");
                         btn.add_css_class("context-menu-btn");
@@ -362,7 +362,7 @@ impl CommitList {
                 bx.set_margin_bottom(4);
 
                 // Helper to append a clickable button
-                let mut add_btn = |label: &str, action: Option<CommitContextAction>| {
+                let add_btn = |label: &str, action: Option<CommitContextAction>| {
                     let btn = gtk::Button::new();
                     btn.add_css_class("flat");
                     btn.add_css_class("context-menu-btn");

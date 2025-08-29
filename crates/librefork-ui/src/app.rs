@@ -299,23 +299,32 @@ pub fn build_ui(app: &Application) {
                     side.load_submodules(&subs);
                 }
 
-                let mut st = state.borrow_mut();
-                st.repo_path = Some(path.to_string());
-                // ensure repo in tabs list
-                if !st.repos.iter().any(|p| p == path) {
-                    st.repos.push(path.to_string());
+                {
+                    let mut st = state.borrow_mut();
+                    st.repo_path = Some(path.to_string());
+                    // ensure repo in tabs list
+                    if !st.repos.iter().any(|p| p == path) {
+                        st.repos.push(path.to_string());
+                    }
+                    // update selected idx
+                    st.current_idx = st.repos.iter().position(|p| p == path);
+                    st.loaded_by_repo.insert(path.to_string(), 0);
                 }
-                // update selected idx
-                st.current_idx = st.repos.iter().position(|p| p == path);
-                st.loaded_by_repo.insert(path.to_string(), 0);
 
                 if let Ok(commits) = repo.list_commits_paginated(0, PAGE_SIZE) {
                     commit_list.load(commits.clone());
                     details.clear();
-                    st.loaded_by_repo.insert(path.to_string(), commits.len());
+                    {
+                        let mut st = state.borrow_mut();
+                        st.loaded_by_repo.insert(path.to_string(), commits.len());
+                    }
                     load_more.set_sensitive(commits.len() == PAGE_SIZE);
                     search_entry.set_text("");
+                    // Reload list with no filter, then select latest commit by default
                     commit_list.filter("");
+                    if let Some(first) = commits.first() {
+                        let _ = commit_list.select_by_oid(&first.oid);
+                    }
                 }
 
                 // Update status bar: branch label + clickable sync counts
