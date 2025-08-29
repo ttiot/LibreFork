@@ -531,6 +531,27 @@ impl CommitList {
         }
     }
 
+    pub fn select_by_oid(&self, oid: &str) -> bool {
+        // Iterate rows to find the one with matching widget_name
+        let mut found: Option<gtk::ListBoxRow> = None;
+        let mut child_opt = self.list.first_child();
+        while let Some(child) = child_opt {
+            if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
+                if row.widget_name() == oid {
+                    found = Some(row);
+                    break;
+                }
+            }
+            child_opt = child.next_sibling();
+        }
+        if let Some(row) = found {
+            self.list.select_row(Some(&row));
+            true
+        } else {
+            false
+        }
+    }
+
     fn reload_list(&self, commits: &[CommitInfo]) {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);

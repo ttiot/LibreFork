@@ -1338,6 +1338,25 @@ pub fn build_ui(app: &Application) {
         });
     }
 
+    // Parent link in details → select the parent commit in list
+    {
+        let commit_list_c = commit_list.clone();
+        let details_c = details.clone();
+        let state_c = state.clone();
+        details.on_parent_clicked(move |oid| {
+            if !commit_list_c.select_by_oid(oid) {
+                // Fallback: open details directly if row not found (e.g., not loaded yet)
+                if let Some(path) = state_c.borrow().repo_path.clone() {
+                    if let Ok(repo) = RepoHandle::open(&path) {
+                        if let Ok((info, message, diff)) = repo.get_commit_details(oid) {
+                            details_c.show_commit(&info, &message, &diff);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Commit list context menu actions
     {
         let details_c = details.clone();

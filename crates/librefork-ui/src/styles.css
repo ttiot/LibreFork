@@ -88,3 +88,9 @@
 .commit-meta-key {
     opacity: 0.7;
 }
+
+.text-link {
+    color: rgb(53, 132, 228);
+    text-decoration: underline;
+}
+.text-link:hover { filter: brightness(1.1); }

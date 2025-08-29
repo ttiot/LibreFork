@@ -15,7 +15,8 @@ pub struct CommitDetails {
     avatar_pic: gtk::Picture,
     avatar_initials: gtk::Label,
     sha_value: gtk::Label,
-    parents_value: gtk::Label,
+    parents_box: gtk::Box,
+    on_parent_click: std::rc::Rc<std::cell::RefCell<Option<Box<dyn Fn(String)>>>>,
     message: gtk::TextView,
     inline_container: gtk::Box,
     side_container: gtk::Box,
@@ -77,6 +78,10 @@ impl CommitDetails {
         let author_meta = gtk::Label::new(None);
         author_meta.add_css_class("dim-label");
         author_meta.set_xalign(0.0);
+        let author_key = gtk::Label::new(Some("AUTHOR"));
+        author_key.add_css_class("commit-meta-key");
+        author_key.set_xalign(0.0);
+        author_col.append(&author_key);
         author_col.append(&author_name);
         author_col.append(&author_meta);
 
@@ -93,15 +98,16 @@ impl CommitDetails {
         sha_key.set_xalign(0.0);
         let sha_value = gtk::Label::new(None);
         sha_value.set_xalign(0.0);
+        sha_value.add_css_class("monospace");
         let parents_key = gtk::Label::new(Some("PARENTS"));
         parents_key.add_css_class("commit-meta-key");
         parents_key.set_xalign(0.0);
-        let parents_value = gtk::Label::new(None);
-        parents_value.set_xalign(0.0);
+        let parents_box = gtk::Box::new(Orientation::Horizontal, 6);
+        parents_box.set_halign(gtk::Align::Start);
         meta_grid.attach(&sha_key, 0, 0, 1, 1);
         meta_grid.attach(&sha_value, 1, 0, 1, 1);
         meta_grid.attach(&parents_key, 0, 1, 1, 1);
-        meta_grid.attach(&parents_value, 1, 1, 1, 1);
+        meta_grid.attach(&parents_box, 1, 1, 1, 1);
 
         // Summary + message
         let header_summary = gtk::Label::new(None);
@@ -116,6 +122,7 @@ impl CommitDetails {
 
         commit_box.append(&top_row);
         commit_box.append(&meta_grid);
+        commit_box.append(&gtk::Separator::new(Orientation::Horizontal));
         commit_box.append(&header_summary);
         commit_box.append(&message);
         stack.add_titled(&commit_box, Some("commit"), "Commit");
@@ -188,7 +195,8 @@ impl CommitDetails {
             avatar_pic,
             avatar_initials,
             sha_value,
-            parents_value,
+            parents_box,
+            on_parent_click: std::rc::Rc::new(std::cell::RefCell::new(None)),
             message,
             inline_container,
             side_container,
@@ -200,12 +208,17 @@ impl CommitDetails {
         self.root.upcast_ref()
     }
 
+    pub fn on_parent_clicked(&self, f: impl Fn(&str) + 'static) {
+        let cb: Box<dyn Fn(String)> = Box::new(move |s| f(&s));
+        *self.on_parent_click.borrow_mut() = Some(cb);
+    }
+
     pub fn clear(&self) {
         self.header_summary.set_text("");
         self.author_name.set_text("");
         self.author_meta.set_text("");
         self.sha_value.set_text("");
-        self.parents_value.set_text("");
+        while let Some(child) = self.parents_box.first_child() { child.unparent(); }
         self.message.buffer().set_text("");
         while let Some(child) = self.inline_container.first_child() {
             child.unparent();
@@ -233,9 +246,30 @@ impl CommitDetails {
         // Meta values
         self.sha_value.set_text(&info.oid);
         if info.parents.is_empty() {
-            self.parents_value.set_text("<root>");
+            let lbl = gtk::Label::new(Some("<root>"));
+            lbl.add_css_class("dim-label");
+            lbl.set_xalign(0.0);
+            self.parents_box.append(&lbl);
         } else {
-            self.parents_value.set_text(&info.parents.join(", "));
+            while let Some(child) = self.parents_box.first_child() { child.unparent(); }
+            for (idx, p) in info.parents.iter().enumerate() {
+                if idx > 0 {
+                    let sep = gtk::Label::new(Some(","));
+                    sep.add_css_class("dim-label");
+                    self.parents_box.append(&sep);
+                }
+                let short = p.chars().take(7).collect::<String>();
+                let btn = gtk::Button::with_label(&short);
+                btn.add_css_class("flat");
+                btn.add_css_class("text-link");
+                btn.add_css_class("monospace");
+                let oid = p.clone();
+                let cb = self.on_parent_click.clone();
+                btn.connect_clicked(move |_| {
+                    if let Some(f) = &*cb.borrow() { f(oid.clone()); }
+                });
+                self.parents_box.append(&btn);
+            }
         }
 
         // Avatar
