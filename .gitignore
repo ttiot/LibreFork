@@ -1,0 +1,19 @@
+# Binaire compilé
+target/
+
+# Profilage pour cargo
+**/Cargo.lock
+
+# Fichiers temporaires générés par l'éditeur ou le système 
+*.log
+*.rs.bk
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# Artifacts
+stdio-debug`
+!
+
+.history

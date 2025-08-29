@@ -1,0 +1,52 @@
+.dim-label { opacity: 0.7; }
+.commit-warning { color: #f57900; }
+.tag-label {
+    background-color: rgba(53, 132, 228, 0.6);
+    color: white;
+    border-radius: 4px;
+    padding: 0 4px;
+    font-size: 0.8em;
+}
+
+.commit-row {
+    padding: 0;
+    margin: 0;
+    border: none;
+}
+
+/* Top chrome tuning */
+.compact-menubar {
+    padding: 0 6px;
+}
+.compact-toolbar {
+    padding: 4px 8px;
+}
+
+/* Tab bar styling */
+.tabbar {
+    padding: 4px 8px;
+    min-height: 28px;
+    border-bottom: 1px solid rgba(255,255,255,0.18);
+    background: rgba(0,0,0,0.25);
+    gap: 6px;
+}
+.tab-item {
+    border-radius: 6px 6px 0 0;
+    background: transparent;
+}
+.tab-button {
+    padding: 2px 8px;
+}
+.tab-button.tab-active {
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.24);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+}
+.tab-close {
+    padding: 0 4px;
+    min-height: 0;
+    min-width: 0;
+    opacity: 0.7;
+}
+.tab-close:hover { opacity: 1.0; }
