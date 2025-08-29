@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use git2::{ApplyLocation, BranchType, Delta, Oid, Patch, Repository, Sort};
+use git2::{
+    build::CheckoutBuilder, ApplyLocation, BranchType, Cred, CredentialType, Delta, FetchOptions,
+    Oid, Patch, RemoteCallbacks, Repository, Sort,
+};
 use std::path::Path;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -407,9 +410,65 @@ impl RepoHandle {
             .map_err(|e| e.into())
     }
 
+    fn default_fetch_options(&self, url_hint: Option<&str>) -> Result<FetchOptions<'static>> {
+        // Prepare owned data to avoid borrowing `self`/params inside the closure
+        let url_hint_owned = url_hint.map(|s| s.to_string());
+        let config_owned = git2::Config::open_default().ok();
+
+        let mut callbacks = RemoteCallbacks::new();
+
+        // Credentials callback to support SSH agent, SSH keys, and HTTPS helpers
+        callbacks.credentials(move |url, username_from_url, allowed| {
+            let url_eff = url_hint_owned.as_deref().unwrap_or(url);
+            let username = username_from_url.unwrap_or("git");
+
+            // 1) SSH (agent or key files)
+            if allowed.contains(CredentialType::SSH_KEY) {
+                if let Ok(agent_cred) = Cred::ssh_key_from_agent(username) {
+                    return Ok(agent_cred);
+                }
+
+                // Fallback to common key files
+                if let Some(home) = dirs::home_dir() {
+                    for key_name in ["id_ed25519", "id_rsa"] {
+                        let key_path = home.join(".ssh").join(key_name);
+                        if key_path.exists() {
+                            if let Ok(file_cred) = Cred::ssh_key(username, None, &key_path, None) {
+                                return Ok(file_cred);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2) HTTPS via git credential helpers (if configured)
+            if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
+                if let Some(cfg) = &config_owned {
+                    if let Ok(helper_cred) = Cred::credential_helper(cfg, url_eff, username_from_url) {
+                        return Ok(helper_cred);
+                    }
+                }
+            }
+
+            // 3) Some servers probe USERNAME first
+            if allowed.contains(CredentialType::USERNAME) {
+                return Cred::username(username);
+            }
+
+            // 4) Let libgit2 choose platform defaults where applicable
+            Cred::default()
+        });
+
+        let mut fo = FetchOptions::new();
+        fo.remote_callbacks(callbacks);
+        Ok(fo)
+    }
+
     pub fn fetch(&self) -> Result<()> {
         let mut remote = self.repo.find_remote("origin")?;
-        remote.fetch(&[] as &[&str], None, None)?;
+        let url_hint = remote.url();
+        let mut opts = self.default_fetch_options(url_hint)?;
+        remote.fetch(&[] as &[&str], Some(&mut opts), None)?;
         Ok(())
     }
 
@@ -430,6 +489,38 @@ impl RepoHandle {
     pub fn stash(&mut self, message: &str) -> Result<()> {
         let sig = self.repo.signature()?;
         self.repo.stash_save(&sig, message, None)?;
+        Ok(())
+    }
+
+    pub fn checkout_branch(&self, name: &str) -> Result<()> {
+        let full_ref = format!("refs/heads/{}", name);
+        // Point HEAD to the branch
+        self.repo.set_head(&full_ref)?;
+        // Update working tree to match HEAD
+        let mut co = CheckoutBuilder::new();
+        co.force();
+        self.repo.checkout_head(Some(&mut co))?;
+        Ok(())
+    }
+
+    pub fn checkout_tag(&self, name: &str) -> Result<()> {
+        // Accept either plain tag name or full ref
+        let full_ref = if name.starts_with("refs/tags/") {
+            name.to_string()
+        } else {
+            format!("refs/tags/{}", name)
+        };
+        let reference = self.repo.find_reference(&full_ref)?;
+        // Peel tag to a commit (works for annotated and lightweight tags)
+        let obj = reference.peel(git2::ObjectType::Commit)?;
+        let commit = obj
+            .into_commit()
+            .map_err(|_| anyhow::anyhow!("Tag does not point to a commit"))?;
+        // Detach HEAD at the tagged commit
+        self.repo.set_head_detached(commit.id())?;
+        let mut co = CheckoutBuilder::new();
+        co.force();
+        self.repo.checkout_head(Some(&mut co))?;
         Ok(())
     }
 }

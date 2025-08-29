@@ -21,6 +21,7 @@ pub struct SidePanel {
     submodules: Rc<RefCell<Vec<String>>>,
     starred: Rc<RefCell<HashSet<StarredItem>>>,
     on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_activate: Rc<RefCell<Option<Box<dyn Fn(String, String)>>>>,
 }
 
 impl SidePanel {
@@ -71,6 +72,7 @@ impl SidePanel {
         let submodules: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
 
         let on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let on_activate: Rc<RefCell<Option<Box<dyn Fn(String, String)>>>> = Rc::new(RefCell::new(None));
 
         let panel = Self {
             root,
@@ -84,6 +86,7 @@ impl SidePanel {
             submodules: submodules.clone(),
             starred: starred.clone(),
             on_star_changed: on_star_changed.clone(),
+            on_activate: on_activate.clone(),
         };
 
         search.connect_search_changed({
@@ -152,11 +155,53 @@ impl SidePanel {
         });
         tree.add_controller(click);
 
+        // Primary double-click: toggle parent (root) expand/collapse or activate child (checkout)
+        let dbl = gtk::GestureClick::new();
+        let tree_c2 = tree.clone();
+        let store_c2 = store.clone();
+        let on_act_c = on_activate.clone();
+        dbl.connect_pressed(move |g, n_press, x, y| {
+            if g.current_button() == 1 && n_press == 2 {
+                if let Some((Some(path), _col, _x, _y)) = tree_c2.path_at_pos(x as i32, y as i32) {
+                    if let Some(iter) = store_c2.iter(&path) {
+                        // Determine if this is a parent (root) or a child row
+                        if store_c2.iter_parent(&iter).is_none() {
+                            // Toggle expand/collapse on root categories
+                            if tree_c2.row_expanded(&path) {
+                                tree_c2.collapse_row(&path);
+                            } else {
+                                tree_c2.expand_row(&path, false);
+                            }
+                        } else {
+                            if let (Ok(name), Ok(kind)) = (
+                                store_c2.get_value(&iter, 1).get::<String>(),
+                                store_c2.get_value(&iter, 2).get::<String>(),
+                            ) {
+                                if let Some(cb) = &*on_act_c.borrow() {
+                                    let effective_name = if kind == "branch" {
+                                        name.split(" (").next().unwrap_or(&name).to_string()
+                                    } else {
+                                        name.clone()
+                                    };
+                                    cb(kind.clone(), effective_name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        tree.add_controller(dbl);
+
         panel
     }
 
     pub fn on_star_changed(&self, cb: impl Fn() + 'static) {
         *self.on_star_changed.borrow_mut() = Some(Box::new(cb));
+    }
+
+    pub fn on_activate(&self, cb: impl Fn(String, String) + 'static) {
+        *self.on_activate.borrow_mut() = Some(Box::new(cb));
     }
 
     pub fn widget(&self) -> &gtk::Widget {

@@ -1,6 +1,7 @@
 mod app;
 mod widgets;
 mod starred;
+mod recents;
 
 use adw::prelude::*;
 use adw::Application;
