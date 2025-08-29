@@ -25,6 +25,9 @@ struct GraphRowData {
     node_lane: usize,
     parent_lanes: Vec<usize>,
     lane_count: usize,
+    // Lanes (other than the node lane) that currently carry this commit
+    // and should visually connect from the top half into the node.
+    incoming_lanes: Vec<usize>,
 }
 
 const LANE_COLORS: [(f64, f64, f64); 8] = [
@@ -126,8 +129,23 @@ impl CommitList {
                     let x = center(lane);
                     cr.move_to(x, 0.0);
                     if lane == gd.node_lane {
+                        // Node lane: straight down into the node (top half)
                         cr.line_to(x, h / 2.0);
+                    } else if gd.incoming_lanes.contains(&lane) {
+                        // Incoming lane carrying this commit: curve into the node (top half)
+                        let x_node = center(gd.node_lane);
+                        let y0 = 0.0;
+                        let y_mid = h / 2.0;
+                        cr.curve_to(
+                            x,
+                            (y0 + y_mid) / 2.0,
+                            x_node,
+                            (y0 + y_mid) / 2.0,
+                            x_node,
+                            y_mid,
+                        );
                     } else {
+                        // Unrelated active lane continues straight through
                         cr.line_to(x, h);
                     }
                     cr.stroke().ok();
@@ -371,6 +389,14 @@ impl CommitList {
                 }
             }
 
+            // Any lane that carried this commit before this row should connect
+            // into the node in the top half of the row (branching point visual).
+            let incoming_lanes: Vec<usize> = active_before
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| if o.as_ref() == Some(&c.oid) && i != node_lane { Some(i) } else { None })
+                .collect();
+
             for l in lanes.iter_mut() {
                 if l.as_ref() == Some(&c.oid) {
                     *l = None;
@@ -383,6 +409,7 @@ impl CommitList {
                 node_lane,
                 parent_lanes,
                 lane_count,
+                incoming_lanes,
             });
         }
 
