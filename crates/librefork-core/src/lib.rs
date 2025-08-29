@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use git2::{
     build::CheckoutBuilder, ApplyLocation, BranchType, Cred, CredentialType, Delta, FetchOptions,
-    Oid, Patch, RemoteCallbacks, Repository, Sort,
+    Oid, Patch, RemoteCallbacks, Repository, ResetType, Sort,
 };
 use std::path::Path;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -522,5 +522,94 @@ impl RepoHandle {
         co.force();
         self.repo.checkout_head(Some(&mut co))?;
         Ok(())
+    }
+
+    // --- Commit-oriented helpers used by UI context menu ---
+    pub fn create_branch_at(&self, name: &str, oid_str: &str) -> Result<()> {
+        let oid = Oid::from_str(oid_str)?;
+        let commit = self.repo.find_commit(oid)?;
+        self.repo.branch(name, &commit, false)?;
+        Ok(())
+    }
+
+    pub fn create_tag(&self, name: &str, oid_str: &str) -> Result<()> {
+        let oid = Oid::from_str(oid_str)?;
+        let obj = self.repo.find_object(oid, None)?;
+        // Lightweight tag by default (fast, no message/signature)
+        self.repo.tag_lightweight(name, &obj, false)?;
+        Ok(())
+    }
+
+    pub fn reset_hard_to(&self, oid_str: &str) -> Result<()> {
+        let oid = Oid::from_str(oid_str)?;
+        let obj = self.repo.find_object(oid, None)?;
+        let mut co = CheckoutBuilder::new();
+        co.force();
+        self.repo.reset(&obj, ResetType::Hard, Some(&mut co))?;
+        Ok(())
+    }
+
+    pub fn reset_hard_to_parent(&self, oid_str: &str) -> Result<()> {
+        let oid = Oid::from_str(oid_str)?;
+        let commit = self.repo.find_commit(oid)?;
+        if commit.parent_count() == 0 {
+            // Nothing to reset to; noop
+            return Ok(());
+        }
+        let parent = commit.parent(0)?;
+        self.reset_hard_to(&parent.id().to_string())
+    }
+
+    pub fn checkout_commit(&self, oid_str: &str) -> Result<()> {
+        let oid = Oid::from_str(oid_str)?;
+        let commit = self.repo.find_commit(oid)?;
+        self.repo.set_head_detached(commit.id())?;
+        let mut co = CheckoutBuilder::new();
+        co.force();
+        self.repo.checkout_head(Some(&mut co))?;
+        Ok(())
+    }
+
+    pub fn get_commit_patch_text(&self, oid_str: &str) -> Result<String> {
+        let oid = Oid::from_str(oid_str)?;
+        let commit = self.repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let parent_tree = if commit.parent_count() > 0 {
+            Some(commit.parent(0)?.tree()?)
+        } else {
+            None
+        };
+
+        let diff = self
+            .repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+
+        let mut out = String::new();
+        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{}", std::str::from_utf8(line.content()).unwrap_or(""));
+            true
+        })?;
+        Ok(out)
+    }
+
+    pub fn commit_remote_url(&self, oid_str: &str) -> Option<String> {
+        let oid = Oid::from_str(oid_str).ok()?;
+        let _ = oid; // oid used only in path construction
+        let remote = self.repo.find_remote("origin").ok()?;
+        let url = remote.url()?;
+        // Convert common forms to https base
+        let web_base = if url.starts_with("git@") {
+            // git@github.com:user/repo.git
+            let path = url.split(':').nth(1)?; // user/repo.git
+            let host = url.strip_prefix("git@").and_then(|s| s.split(':').next()).unwrap_or("github.com");
+            let path = path.strip_suffix(".git").unwrap_or(path);
+            format!("https://{}/{}", host, path)
+        } else if url.starts_with("https://") || url.starts_with("http://") {
+            url.trim_end_matches(".git").to_string()
+        } else {
+            return None;
+        };
+        Some(format!("{}/commit/{}", web_base, oid_str))
     }
 }

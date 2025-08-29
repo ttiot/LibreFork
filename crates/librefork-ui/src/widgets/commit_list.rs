@@ -3,11 +3,36 @@ use chrono::{DateTime, Local, Locale};
 use gtk::Orientation;
 use gtk4 as gtk;
 use gtk4::{cairo, pango};
+use gtk::gdk;
 use librefork_core::CommitInfo;
 use crate::starred::StarredItem;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitContextAction {
+    Revert,
+    ResetTo,
+    ResetToPrevious,
+    AiRebasePreview,
+    RebaseOnto,
+    SwitchTo,
+    CreateBranch,
+    CreatePatch,
+    CreateTag,
+    ExplainChanges,
+    OpenChanges,
+    InspectDetails,
+    OpenOnRemote,
+    CompareToFromHead,
+    CompareWorkingTreeToHere,
+    CopyPatch,
+    Share,
+    Copy,
+    CopySha,
+    CopyMessage,
+}
 
 #[derive(Clone)]
 pub struct CommitList {
@@ -17,6 +42,7 @@ pub struct CommitList {
     on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>>,
     starred: Rc<RefCell<HashSet<StarredItem>>>,
     on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_action: Rc<RefCell<Option<Box<dyn Fn(CommitContextAction, String)>>>>,
 }
 
 #[derive(Clone)]
@@ -55,6 +81,7 @@ impl CommitList {
         let on_select: Rc<RefCell<Option<Box<dyn Fn(&str)>>>> = Rc::new(RefCell::new(None));
         let commits: Rc<RefCell<Vec<CommitInfo>>> = Rc::new(RefCell::new(Vec::new()));
         let on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let on_action: Rc<RefCell<Option<Box<dyn Fn(CommitContextAction, String)>>>> = Rc::new(RefCell::new(None));
 
         let cb = on_select.clone();
         list.connect_row_selected(move |_, row| {
@@ -66,6 +93,81 @@ impl CommitList {
             }
         });
 
+        // Global right-click on the list as a fallback to ensure menu appears
+        {
+            let list_c = list.clone();
+            let on_action_c = on_action.clone();
+            let click = gtk::GestureClick::new();
+            click.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
+            // Let row-specific handlers run first; this is a fallback only
+            click.set_propagation_phase(gtk::PropagationPhase::Bubble);
+            click.connect_pressed(move |g, _n, x, y| {
+                if g.current_button() != 3 { return; }
+                if let Some(row) = list_c.row_at_y(y as i32) {
+                    let oid = row.widget_name().to_string();
+                    if oid.is_empty() { return; }
+                    // Claim the sequence so ancestors don't also open a menu
+                    g.set_state(gtk::EventSequenceState::Claimed);
+
+                    // Build a modern-looking, left-aligned popover menu
+                    let pop = gtk::Popover::new();
+                    pop.add_css_class("context-menu");
+                    let bx = gtk::Box::new(Orientation::Vertical, 0);
+                    bx.set_margin_top(4);
+                    bx.set_margin_bottom(4);
+
+                    let mut add_btn = |label: &str, action: CommitContextAction| {
+                        let btn = gtk::Button::new();
+                        btn.add_css_class("flat");
+                        btn.add_css_class("context-menu-btn");
+                        btn.set_halign(gtk::Align::Fill);
+                        btn.set_hexpand(true);
+                        let lbl = gtk::Label::new(Some(label));
+                        lbl.set_xalign(0.0);
+                        btn.set_child(Some(&lbl));
+                        let on_action_c = on_action_c.clone();
+                        let oid = oid.clone();
+                        let pop_c = pop.clone();
+                        btn.connect_clicked(move |_| {
+                            if let Some(cb) = &*on_action_c.borrow() { cb(action, oid.clone()); }
+                            pop_c.popdown();
+                        });
+                        bx.append(&btn);
+                    };
+                    add_btn("Revert Commit…", CommitContextAction::Revert);
+                    add_btn("Reset Current Branch to Commit…", CommitContextAction::ResetTo);
+                    add_btn("Reset Current Branch to Previous Commit…", CommitContextAction::ResetToPrevious);
+                    add_btn("AI Rebase Current Branch onto Commit (Preview)…", CommitContextAction::AiRebasePreview);
+                    add_btn("Rebase Current Branch onto Commit…", CommitContextAction::RebaseOnto);
+                    add_btn("Switch to Commit…", CommitContextAction::SwitchTo);
+                    bx.append(&gtk::Separator::new(Orientation::Horizontal));
+                    add_btn("Create Branch…", CommitContextAction::CreateBranch);
+                    add_btn("Create Patch…", CommitContextAction::CreatePatch);
+                    add_btn("Create Tag…", CommitContextAction::CreateTag);
+                    bx.append(&gtk::Separator::new(Orientation::Horizontal));
+                    add_btn("Explain Changes (Preview)", CommitContextAction::ExplainChanges);
+                    add_btn("Open Changes", CommitContextAction::OpenChanges);
+                    add_btn("Inspect Details", CommitContextAction::InspectDetails);
+                    add_btn("Open Commit on Remote", CommitContextAction::OpenOnRemote);
+                    add_btn("Compare to/from HEAD", CommitContextAction::CompareToFromHead);
+                    add_btn("Compare Working Tree to Here", CommitContextAction::CompareWorkingTreeToHere);
+                    add_btn("Copy Changes (Patch)", CommitContextAction::CopyPatch);
+                    bx.append(&gtk::Separator::new(Orientation::Horizontal));
+                    add_btn("Share", CommitContextAction::Share);
+                    add_btn("Copy", CommitContextAction::Copy);
+                    add_btn("Copy SHA", CommitContextAction::CopySha);
+                    add_btn("Copy Message", CommitContextAction::CopyMessage);
+
+                    pop.set_child(Some(&bx));
+                    // Parent to the list to avoid coordinate transforms
+                    pop.set_parent(&list_c);
+                    pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+                    pop.popup();
+                }
+            });
+            list.add_controller(click);
+        }
+
         Self {
             root,
             list,
@@ -73,6 +175,7 @@ impl CommitList {
             on_select,
             starred,
             on_star_changed,
+            on_action,
         }
     }
 
@@ -84,11 +187,16 @@ impl CommitList {
         *self.on_star_changed.borrow_mut() = Some(Box::new(cb));
     }
 
+    pub fn on_action(&self, cb: impl Fn(CommitContextAction, String) + 'static) {
+        *self.on_action.borrow_mut() = Some(Box::new(cb));
+    }
+
     fn row_from_commit(
         c: &CommitInfo,
         g: &GraphRowData,
         starred: Rc<RefCell<HashSet<StarredItem>>>,
         on_star_changed: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+        on_action: Rc<RefCell<Option<Box<dyn Fn(CommitContextAction, String)>>>>,
     ) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         row.set_height_request(24);
@@ -238,45 +346,140 @@ impl CommitList {
         let oid = c.oid.clone();
         let star_label_c = star_label.clone();
         let click = gtk::GestureClick::new();
+        click.set_button(gdk::ffi::GDK_BUTTON_SECONDARY as u32);
+        // Handle at the target so we can claim the sequence
+        click.set_propagation_phase(gtk::PropagationPhase::Target);
         let row_c = row.clone();
+        let on_action_cb = on_action.clone();
         click.connect_pressed(move |g, _, x, y| {
             if g.current_button() == 3 {
+                // Claim this sequence to avoid ancestor fallback handling
+                g.set_state(gtk::EventSequenceState::Claimed);
+                let pop = gtk::Popover::new();
+                pop.add_css_class("context-menu");
+                let bx = gtk::Box::new(Orientation::Vertical, 0);
+                bx.set_margin_top(4);
+                bx.set_margin_bottom(4);
+
+                // Helper to append a clickable button
+                let mut add_btn = |label: &str, action: Option<CommitContextAction>| {
+                    let btn = gtk::Button::new();
+                    btn.add_css_class("flat");
+                    btn.add_css_class("context-menu-btn");
+                    btn.set_halign(gtk::Align::Fill);
+                    btn.set_hexpand(true);
+                    let lbl = gtk::Label::new(Some(label));
+                    lbl.set_xalign(0.0);
+                    btn.set_child(Some(&lbl));
+                    if let Some(act) = action {
+                        let oid = oid.clone();
+                        let pop_c = pop.clone();
+                        let on_action_cb = on_action_cb.clone();
+                        btn.connect_clicked(move |_| {
+                            if let Some(cb) = &*on_action_cb.borrow() {
+                                cb(act, oid.clone());
+                            }
+                            pop_c.popdown();
+                        });
+                    }
+                    bx.append(&btn);
+                };
+
+                // Build menu (mirrors screenshot order)
+                add_btn("Revert Commit…", Some(CommitContextAction::Revert));
+                add_btn(
+                    "Reset Current Branch to Commit…",
+                    Some(CommitContextAction::ResetTo),
+                );
+                add_btn(
+                    "Reset Current Branch to Previous Commit…",
+                    Some(CommitContextAction::ResetToPrevious),
+                );
+                add_btn(
+                    "AI Rebase Current Branch onto Commit (Preview)…",
+                    Some(CommitContextAction::AiRebasePreview),
+                );
+                add_btn(
+                    "Rebase Current Branch onto Commit…",
+                    Some(CommitContextAction::RebaseOnto),
+                );
+                add_btn("Switch to Commit…", Some(CommitContextAction::SwitchTo));
+
+                bx.append(&gtk::Separator::new(Orientation::Horizontal));
+
+                add_btn("Create Branch…", Some(CommitContextAction::CreateBranch));
+                add_btn("Create Patch…", Some(CommitContextAction::CreatePatch));
+                add_btn("Create Tag…", Some(CommitContextAction::CreateTag));
+
+                bx.append(&gtk::Separator::new(Orientation::Horizontal));
+
+                add_btn(
+                    "Explain Changes (Preview)",
+                    Some(CommitContextAction::ExplainChanges),
+                );
+                add_btn("Open Changes", Some(CommitContextAction::OpenChanges));
+                add_btn("Inspect Details", Some(CommitContextAction::InspectDetails));
+                add_btn(
+                    "Open Commit on Remote",
+                    Some(CommitContextAction::OpenOnRemote),
+                );
+                add_btn(
+                    "Compare to/from HEAD",
+                    Some(CommitContextAction::CompareToFromHead),
+                );
+                add_btn(
+                    "Compare Working Tree to Here",
+                    Some(CommitContextAction::CompareWorkingTreeToHere),
+                );
+                add_btn(
+                    "Copy Changes (Patch)",
+                    Some(CommitContextAction::CopyPatch),
+                );
+
+                bx.append(&gtk::Separator::new(Orientation::Horizontal));
+
+                add_btn("Share", Some(CommitContextAction::Share));
+                add_btn("Copy", Some(CommitContextAction::Copy));
+                add_btn("Copy SHA", Some(CommitContextAction::CopySha));
+                add_btn("Copy Message", Some(CommitContextAction::CopyMessage));
+
+                // Star/unstar
+                bx.append(&gtk::Separator::new(Orientation::Horizontal));
                 let item = StarredItem::Commit(oid.clone());
                 let already = starred.borrow().contains(&item);
-                let label = if already {
-                    "Retirer des favoris"
-                } else {
-                    "Ajouter aux favoris"
-                };
-                let pop = gtk::Popover::new();
-                let bx = gtk::Box::new(Orientation::Vertical, 0);
-                let starred_c = starred.clone();
-                let star_label_c2 = star_label_c.clone();
-                let pop_c = pop.clone();
-                let on_star_c = on_star_changed.clone();
-                let btn = gtk::Button::with_label(label);
-                btn.connect_clicked(move |_| {
-                    let mut st = starred_c.borrow_mut();
-                    if already {
-                        st.remove(&item);
-                        star_label_c2.set_text("☆");
-                    } else {
-                        st.insert(item.clone());
-                        star_label_c2.set_text("★");
-                    }
-                    if let Some(cb) = &*on_star_c.borrow() {
-                        cb();
-                    }
-                    pop_c.popdown();
-                });
-                bx.append(&btn);
+                let label = if already { "Retirer des favoris" } else { "Ajouter aux favoris" };
+                let btn_star = gtk::Button::new();
+                btn_star.add_css_class("flat");
+                btn_star.add_css_class("context-menu-btn");
+                btn_star.set_halign(gtk::Align::Fill);
+                btn_star.set_hexpand(true);
+                let star_lbl = gtk::Label::new(Some(label));
+                star_lbl.set_xalign(0.0);
+                btn_star.set_child(Some(&star_lbl));
+                {
+                    let starred_c = starred.clone();
+                    let star_label_c2 = star_label_c.clone();
+                    let on_star_c2 = on_star_changed.clone();
+                    let pop_c = pop.clone();
+                    btn_star.connect_clicked(move |_| {
+                        let mut st = starred_c.borrow_mut();
+                        if already {
+                            st.remove(&item);
+                            star_label_c2.set_text("☆");
+                        } else {
+                            st.insert(item.clone());
+                            star_label_c2.set_text("★");
+                        }
+                        if let Some(cb) = &*on_star_c2.borrow() {
+                            cb();
+                        }
+                        pop_c.popdown();
+                    });
+                }
+                bx.append(&btn_star);
+
                 pop.set_child(Some(&bx));
-                pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-                    x as i32,
-                    y as i32,
-                    1,
-                    1,
-                )));
+                pop.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
                 pop.set_parent(&row_c);
                 pop.popup();
             }
@@ -339,6 +542,7 @@ impl CommitList {
                 g,
                 self.starred.clone(),
                 self.on_star_changed.clone(),
+                self.on_action.clone(),
             );
             self.list.append(&row);
         }

@@ -13,7 +13,7 @@ use crate::starred::{StarDb, StarredItem};
 use crate::recents::RecentDb;
 use glib::prelude::ToVariant;
 use crate::widgets::{
-    commit_details::CommitDetails, commit_list::CommitList, side_panel::SidePanel,
+    commit_details::CommitDetails, commit_list::{CommitList, CommitContextAction}, side_panel::SidePanel,
 };
 use std::collections::HashSet;
 
@@ -342,7 +342,7 @@ pub fn build_ui(app: &Application) {
     }
 
     // Simple tab row with a "+" opener; visible only when >= 2 repos
-    let tabs_row = gtk::Box::new(Orientation::Horizontal, 4);
+    let tabs_row = gtk::Box::new(Orientation::Horizontal, 6);
     tabs_row.add_css_class("toolbar");
     tabs_row.add_css_class("tabbar");
     let plus_button = gtk::Button::from_icon_name("list-add-symbolic");
@@ -1333,6 +1333,210 @@ pub fn build_ui(app: &Application) {
                     if let Ok((info, message, diff)) = repo.get_commit_details(oid) {
                         details_c.show_commit(&info, &message, &diff);
                     }
+                }
+            }
+        });
+    }
+
+    // Commit list context menu actions
+    {
+        let details_c = details.clone();
+        let state_c = state.clone();
+        let run_repo_op_c = run_repo_op.clone();
+        commit_list.on_action(move |action, oid| {
+            // Helper: open details for a given commit
+            let open_details = || {
+                if let Some(path) = state_c.borrow().repo_path.clone() {
+                    if let Ok(repo) = RepoHandle::open(&path) {
+                        if let Ok((info, message, diff)) = repo.get_commit_details(&oid) {
+                            details_c.show_commit(&info, &message, &diff);
+                        }
+                    }
+                }
+            };
+            match action {
+                CommitContextAction::OpenChanges | CommitContextAction::InspectDetails => {
+                    open_details();
+                }
+                CommitContextAction::CopySha => {
+                    if let Some(cb) = Display::default().map(|d| d.clipboard()) {
+                        cb.set_text(&oid);
+                    }
+                }
+                CommitContextAction::CopyMessage | CommitContextAction::Copy => {
+                    if let Some(path) = state_c.borrow().repo_path.clone() {
+                        if let Ok(repo) = RepoHandle::open(&path) {
+                            if let Ok((info, _msg, _)) = repo.get_commit_details(&oid) {
+                                let text = if matches!(action, CommitContextAction::CopyMessage) {
+                                    _msg
+                                } else {
+                                    format!("[{}] {}", info.short_id, info.summary)
+                                };
+                                if let Some(cb) = Display::default().map(|d| d.clipboard()) {
+                                    cb.set_text(&text);
+                                }
+                            }
+                        }
+                    }
+                }
+                CommitContextAction::CopyPatch => {
+                    let path_opt = { state_c.borrow().repo_path.clone() };
+                    if let Some(path) = path_opt {
+                        if let Ok(repo) = RepoHandle::open(&path) {
+                            if let Ok(patch) = repo.get_commit_patch_text(&oid) {
+                                if let Some(cb) = Display::default().map(|d| d.clipboard()) {
+                                    cb.set_text(&patch);
+                                }
+                            }
+                        }
+                    }
+                }
+                CommitContextAction::CreateBranch => {
+                    let dialog = adw::MessageDialog::builder()
+                        .body("Nom de la branche à créer à ce commit:")
+                        .heading("Créer une branche")
+                        .extra_child(&{
+                            let entry = gtk::Entry::new();
+                            entry.set_hexpand(true);
+                            entry.set_widget_name("branch_entry");
+                            entry
+                        })
+                        .build();
+                    dialog.add_response("cancel", "Annuler");
+                    dialog.add_response("ok", "Créer");
+                    dialog.set_default_response(Some("ok"));
+                    let run_repo_op_c2 = run_repo_op_c.clone();
+                    dialog.connect_response(None, move |d: &adw::MessageDialog, resp: &str| {
+                        if resp == "ok" {
+                            if let Some(entry) = d
+                                .extra_child()
+                                .and_then(|w| w.downcast::<gtk::Entry>().ok())
+                            {
+                                let name = entry.text().to_string();
+                                if !name.is_empty() {
+                                    let oid_c = oid.clone();
+                                    run_repo_op_c2("Create Branch", Box::new(move |repo| {
+                                        repo.create_branch_at(&name, &oid_c).map_err(|e| e.into())
+                                    }));
+                                }
+                            }
+                        }
+                    });
+                    dialog.present();
+                }
+                CommitContextAction::CreateTag => {
+                    let dialog = adw::MessageDialog::builder()
+                        .body("Nom du tag à créer à ce commit:")
+                        .heading("Créer un tag")
+                        .extra_child(&{
+                            let entry = gtk::Entry::new();
+                            entry.set_hexpand(true);
+                            entry.set_widget_name("tag_entry");
+                            entry
+                        })
+                        .build();
+                    dialog.add_response("cancel", "Annuler");
+                    dialog.add_response("ok", "Créer");
+                    dialog.set_default_response(Some("ok"));
+                    let run_repo_op_c2 = run_repo_op_c.clone();
+                    dialog.connect_response(None, move |d: &adw::MessageDialog, resp: &str| {
+                        if resp == "ok" {
+                            if let Some(entry) = d
+                                .extra_child()
+                                .and_then(|w| w.downcast::<gtk::Entry>().ok())
+                            {
+                                let name = entry.text().to_string();
+                                if !name.is_empty() {
+                                    let oid_c = oid.clone();
+                                    run_repo_op_c2("Create Tag", Box::new(move |repo| {
+                                        repo.create_tag(&name, &oid_c).map_err(|e| e.into())
+                                    }));
+                                }
+                            }
+                        }
+                    });
+                    dialog.present();
+                }
+                CommitContextAction::CreatePatch => {
+                    // Save patch to a file (quick path without dialog): in repository path
+                    if let Some(path) = state_c.borrow().repo_path.clone() {
+                        if let Ok(repo) = RepoHandle::open(&path) {
+                            if let Ok(patch) = repo.get_commit_patch_text(&oid) {
+                                let default = format!("{}.patch", &oid[..7.min(oid.len())]);
+                                let target = std::path::Path::new(&path).join(default);
+                                let _ = std::fs::write(&target, patch);
+                                let info = adw::MessageDialog::new(
+                                    None::<&adw::ApplicationWindow>,
+                                    Some("Patch créé"),
+                                    Some(&format!("Enregistré dans: {}", target.display())),
+                                );
+                                info.add_response("ok", "OK");
+                                info.present();
+                            }
+                        }
+                    }
+                }
+                CommitContextAction::ResetTo => {
+                    let run_repo_op_c2 = run_repo_op_c.clone();
+                    let oid_c = oid.clone();
+                    let dlg = adw::MessageDialog::new(
+                        None::<&adw::ApplicationWindow>,
+                        Some("Confirmer le reset"),
+                        Some("Réinitialiser la branche courante sur ce commit (hard reset) ?"),
+                    );
+                    dlg.add_response("cancel", "Annuler");
+                    dlg.add_response("ok", "Reset");
+                    dlg.connect_response(None, move |_d: &adw::MessageDialog, resp: &str| {
+                        if resp == "ok" {
+                            let value = oid_c.clone();
+                            run_repo_op_c2("Reset", Box::new(move |repo| repo.reset_hard_to(&value).map_err(|e| e.into())));
+                        }
+                    });
+                    dlg.present();
+                }
+                CommitContextAction::ResetToPrevious => {
+                    let oid_c = oid.clone();
+                    let run_repo_op_c2 = run_repo_op_c.clone();
+                    run_repo_op_c2("Reset", Box::new(move |repo| repo.reset_hard_to_parent(&oid_c).map_err(|e| e.into())));
+                }
+                CommitContextAction::SwitchTo => {
+                    let oid_c = oid.clone();
+                    let run_repo_op_c2 = run_repo_op_c.clone();
+                    run_repo_op_c2("Checkout", Box::new(move |repo| repo.checkout_commit(&oid_c).map_err(|e| e.into())));
+                }
+                CommitContextAction::OpenOnRemote => {
+                    if let Some(path) = state_c.borrow().repo_path.clone() {
+                        if let Ok(repo) = RepoHandle::open(&path) {
+                            if let Some(url) = repo.commit_remote_url(&oid) {
+                                if let Some(cb) = Display::default().map(|d| d.clipboard()) {
+                                    cb.set_text(&url);
+                                }
+                                let info = adw::MessageDialog::new(
+                                    None::<&adw::ApplicationWindow>,
+                                    Some("Lien copié"),
+                                    Some(&url),
+                                );
+                                info.add_response("ok", "OK");
+                                info.present();
+                            }
+                        }
+                    }
+                }
+                // Not yet implemented actions → friendly notification
+                CommitContextAction::Revert
+                | CommitContextAction::AiRebasePreview
+                | CommitContextAction::RebaseOnto
+                | CommitContextAction::ExplainChanges
+                | CommitContextAction::CompareToFromHead
+                | CommitContextAction::CompareWorkingTreeToHere
+                | CommitContextAction::Share => {
+                    let info = adw::MessageDialog::new(
+                        None::<&adw::ApplicationWindow>,
+                        Some("Bientôt disponible"),
+                        Some("Cette action n'est pas encore implémentée."),
+                    );
+                    info.add_response("ok", "OK");
+                    info.present();
                 }
             }
         });
