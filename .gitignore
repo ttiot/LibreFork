@@ -15,5 +15,5 @@ Thumbs.db
 # Artifacts
 stdio-debug`
 !
-
+.gocache
 .history
